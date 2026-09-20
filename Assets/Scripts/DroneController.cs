@@ -3,123 +3,153 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class DroneController : MonoBehaviour
 {
-    [Header("Flight")]
-    public float liftForce = 35f;
+    public enum Mode { Manual, Mission }
+    public Mode mode = Mode.Manual;
+
+    [Header("Mission")]
+    public WaypointManager waypointManager;
+
+    [Header("Hover")]
+    public float targetHeight = 2f;
+    public float hoverKp = 30f;
+    public float hoverKd = 10f;
+
+    [Header("Movement")]
     public float moveForce = 8f;
     public float yawTorque = 3f;
 
-    [Header("Smart Hover")]
-    public float hoverPower = 25f;
-    public float damping = 8f;
-    public LayerMask groundMask = -1;
-
     [Header("Tilt")]
-    public float maxTilt = 18f;
-    public float tiltSpeed = 5f;
+    public float maxPitch = 18f;
+    public float maxRoll = 15f;
+    public float rotationSpeed = 3f;
 
     Rigidbody rb;
 
-    float h, v, yaw;
-    float throttle;
+    int wp = 0;
 
-    float targetHeight;
-    bool hoverMode = false;
-
-    void Awake()
+    void Start()
     {
         rb = GetComponent<Rigidbody>();
 
         rb.mass = 1.8f;
-        rb.linearDamping = 0.3f;
-        rb.angularDamping = 3f;
-        rb.useGravity = true;
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
-
-        targetHeight = GetHeight();
+        rb.linearDamping = 2f;
+        rb.angularDamping = 4f;
     }
 
     void Update()
     {
-        h = Input.GetAxis("Horizontal");
-        v = Input.GetAxis("Vertical");
+        if (Input.GetKeyDown(KeyCode.M))
+            mode = Mode.Manual;
 
-        yaw = 0;
-        if (Input.GetKey(KeyCode.Q)) yaw = -1;
-        if (Input.GetKey(KeyCode.E)) yaw = 1;
-
-        throttle = 0;
-
-        if (Input.GetKey(KeyCode.Space))
-        {
-            throttle = 1;
-            hoverMode = false;
-        }
-        else if (Input.GetKey(KeyCode.LeftShift))
-        {
-            throttle = -0.8f;
-            hoverMode = false;
-        }
-        else
-        {
-            // Lock the altitude only once when keys are released
-            if (!hoverMode)
-            {
-                targetHeight = GetHeight();
-                hoverMode = true;
-            }
-        }
+        if (Input.GetKeyDown(KeyCode.L))
+            mode = Mode.Mission;
     }
 
     void FixedUpdate()
     {
-        // Manual climb / descend
-        if (!hoverMode)
-        {
-            rb.AddForce(Vector3.up * throttle * liftForce, ForceMode.Force);
-        }
+        Hover();
+
+        if (mode == Mode.Manual)
+            ManualFlight();
         else
-        {
-            // Hold CURRENT altitude
-            float current = GetHeight();
-            float error = targetHeight - current;
+            MissionFlight();
+    }
 
-            float lift = (error * hoverPower) - (rb.linearVelocity.y * damping);
+    void Hover()
+    {
+        float error = targetHeight - transform.position.y;
 
-            rb.AddForce(Vector3.up * lift, ForceMode.Acceleration);
-        }
+        float lift =
+            error * hoverKp
+            - rb.linearVelocity.y * hoverKd;
 
-        // Movement
+        rb.AddForce(Vector3.up * lift, ForceMode.Acceleration);
+    }
+
+    void ManualFlight()
+    {
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+
         Vector3 move =
             transform.forward * v +
             transform.right * h;
 
-        rb.AddForce(move * moveForce, ForceMode.Force);
+        rb.AddForce(move * moveForce, ForceMode.Acceleration);
 
-        // Rotate
-        rb.AddTorque(Vector3.up * yaw * yawTorque, ForceMode.VelocityChange);
+        if (Input.GetKey(KeyCode.Q))
+            rb.AddTorque(Vector3.up * -yawTorque, ForceMode.Acceleration);
 
-        // Visual tilt
-        Quaternion target = Quaternion.Euler(
-            v * maxTilt,
-            transform.eulerAngles.y,
-            -h * maxTilt
-        );
+        if (Input.GetKey(KeyCode.E))
+            rb.AddTorque(Vector3.up * yawTorque, ForceMode.Acceleration);
+
+        if (Input.GetKey(KeyCode.Space))
+            targetHeight += 0.03f;
+
+        if (Input.GetKey(KeyCode.LeftShift))
+            targetHeight -= 0.03f;
+
+        targetHeight = Mathf.Clamp(targetHeight, 0.5f, 10f);
+
+        Tilt(move.normalized);
+    }
+
+    void MissionFlight()
+    {
+        if (waypointManager == null || waypointManager.Count == 0)
+            return;
+
+        Transform target = waypointManager.GetWaypoint(wp);
+
+        Vector3 goal = new Vector3(
+            target.position.x,
+            transform.position.y,
+            target.position.z);
+
+        Vector3 dir = goal - transform.position;
+
+        if (dir.magnitude < 0.4f)
+        {
+            wp = (wp + 1) % waypointManager.Count;
+            return;
+        }
+
+        dir.Normalize();
+
+        rb.AddForce(dir * moveForce, ForceMode.Acceleration);
+
+        Quaternion face =
+            Quaternion.LookRotation(new Vector3(dir.x,0,dir.z));
 
         rb.MoveRotation(
             Quaternion.Slerp(
                 rb.rotation,
-                target,
-                tiltSpeed * Time.fixedDeltaTime
-            )
-        );
+                face,
+                rotationSpeed * Time.fixedDeltaTime));
+
+        Tilt(dir);
     }
 
-    float GetHeight()
+    void Tilt(Vector3 dir)
     {
-        if (Physics.Raycast(transform.position, Vector3.down, out RaycastHit hit, 100f, groundMask))
-            return hit.distance;
+        if (dir.sqrMagnitude < 0.01f) return;
 
-        return transform.position.y;
+        float pitch =
+            Vector3.Dot(dir, transform.forward) * -maxPitch;
+
+        float roll =
+            Vector3.Dot(dir, transform.right) * maxRoll;
+
+        Quaternion bank =
+            Quaternion.Euler(
+                pitch,
+                rb.rotation.eulerAngles.y,
+                -roll);
+
+        rb.MoveRotation(
+            Quaternion.Slerp(
+                rb.rotation,
+                bank,
+                rotationSpeed * Time.fixedDeltaTime));
     }
 }

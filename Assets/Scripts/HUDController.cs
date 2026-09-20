@@ -21,7 +21,8 @@ public class HUDController : MonoBehaviour
         float speed = droneRB.linearVelocity.magnitude;
         float heading = drone.eulerAngles.y;
 
-        battery -= speed * 0.002f * Time.deltaTime;
+        // Battery drains only while moving
+        battery -= speed * 0.02f * Time.deltaTime;
         battery = Mathf.Clamp(battery, 0, 100);
 
         altitudeText.text = $"ALT {altitude:0.0} m";
