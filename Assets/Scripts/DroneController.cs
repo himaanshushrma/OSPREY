@@ -3,114 +3,164 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class DroneController : MonoBehaviour
 {
-    public enum Mode { Manual, Mission }
-    public Mode mode = Mode.Manual;
+    public enum FlightMode
+    {
+        Manual,
+        Leader
+    }
 
-    [Header("Mission")]
+    [Header("Mode")]
+    public FlightMode mode = FlightMode.Manual;
     public WaypointManager waypointManager;
 
     [Header("Hover")]
     public float targetHeight = 2f;
-    public float hoverKp = 30f;
-    public float hoverKd = 10f;
+    public float hoverForce = 30f;
+    public float damping = 8f;
 
     [Header("Movement")]
     public float moveForce = 8f;
-    public float yawTorque = 3f;
+    public float yawSpeed = 80f;
 
     [Header("Tilt")]
     public float maxPitch = 18f;
     public float maxRoll = 15f;
-    public float rotationSpeed = 3f;
+    public float tiltSpeed = 5f;
+
+    [Header("Mission")]
+    public float arriveDistance = 0.5f;
 
     Rigidbody rb;
 
-    int wp = 0;
+    float pitch;
+    float roll;
+    int waypointIndex = 0;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
 
-        rb.mass = 1.8f;
+        rb.useGravity = true;
         rb.linearDamping = 2f;
         rb.angularDamping = 4f;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
     }
 
     void Update()
     {
         if (Input.GetKeyDown(KeyCode.M))
-            mode = Mode.Manual;
+        {
+            mode = FlightMode.Manual;
+            Debug.Log("MANUAL MODE");
+        }
 
         if (Input.GetKeyDown(KeyCode.L))
-            mode = Mode.Mission;
+        {
+            mode = FlightMode.Leader;
+            Debug.Log("LEADER MODE");
+        }
     }
 
     void FixedUpdate()
     {
         Hover();
 
-        if (mode == Mode.Manual)
-            ManualFlight();
+        if (mode == FlightMode.Manual)
+            ManualControl();
         else
-            MissionFlight();
+            LeaderMission();
     }
 
     void Hover()
     {
         float error = targetHeight - transform.position.y;
-
-        float lift =
-            error * hoverKp
-            - rb.linearVelocity.y * hoverKd;
+        float lift = error * hoverForce - rb.linearVelocity.y * damping;
 
         rb.AddForce(Vector3.up * lift, ForceMode.Acceleration);
     }
 
-    void ManualFlight()
+    void ManualControl()
     {
-        float h = Input.GetAxis("Horizontal");
-        float v = Input.GetAxis("Vertical");
+        Vector3 move = Vector3.zero;
 
-        Vector3 move =
-            transform.forward * v +
-            transform.right * h;
+        // Forward / Back
+        if (Input.GetKey(KeyCode.W))
+        {
+            move += transform.forward;
+            pitch = -maxPitch;
+        }
+        else if (Input.GetKey(KeyCode.S))
+        {
+            move -= transform.forward;
+            pitch = maxPitch;
+        }
+        else
+            pitch = 0;
 
+        // Left / Right
+        if (Input.GetKey(KeyCode.A))
+        {
+            move -= transform.right;
+            roll = maxRoll;
+        }
+        else if (Input.GetKey(KeyCode.D))
+        {
+            move += transform.right;
+            roll = -maxRoll;
+        }
+        else
+            roll = 0;
+
+        move.Normalize();
         rb.AddForce(move * moveForce, ForceMode.Acceleration);
 
-        if (Input.GetKey(KeyCode.Q))
-            rb.AddTorque(Vector3.up * -yawTorque, ForceMode.Acceleration);
-
-        if (Input.GetKey(KeyCode.E))
-            rb.AddTorque(Vector3.up * yawTorque, ForceMode.Acceleration);
-
+        // Altitude
         if (Input.GetKey(KeyCode.Space))
-            targetHeight += 0.03f;
+            targetHeight += 0.04f;
 
         if (Input.GetKey(KeyCode.LeftShift))
-            targetHeight -= 0.03f;
+            targetHeight -= 0.04f;
 
-        targetHeight = Mathf.Clamp(targetHeight, 0.5f, 10f);
+        targetHeight = Mathf.Clamp(targetHeight, 1f, 20f);
 
-        Tilt(move.normalized);
+        // Yaw
+        float yaw = 0;
+
+        if (Input.GetKey(KeyCode.Q))
+            yaw = -yawSpeed;
+
+        if (Input.GetKey(KeyCode.E))
+            yaw = yawSpeed;
+
+        Quaternion targetRot = Quaternion.Euler(
+            pitch,
+            transform.eulerAngles.y + yaw * Time.fixedDeltaTime,
+            roll);
+
+        rb.MoveRotation(
+            Quaternion.Slerp(
+                rb.rotation,
+                targetRot,
+                tiltSpeed * Time.fixedDeltaTime));
     }
 
-    void MissionFlight()
+    void LeaderMission()
     {
         if (waypointManager == null || waypointManager.Count == 0)
             return;
 
-        Transform target = waypointManager.GetWaypoint(wp);
+        Transform wp = waypointManager.GetWaypoint(waypointIndex);
 
-        Vector3 goal = new Vector3(
-            target.position.x,
+        Vector3 target = new Vector3(
+            wp.position.x,
             transform.position.y,
-            target.position.z);
+            wp.position.z);
 
-        Vector3 dir = goal - transform.position;
+        Vector3 dir = target - transform.position;
 
-        if (dir.magnitude < 0.4f)
+        if (dir.magnitude < arriveDistance)
         {
-            wp = (wp + 1) % waypointManager.Count;
+            waypointIndex = (waypointIndex + 1) % waypointManager.Count;
             return;
         }
 
@@ -118,38 +168,12 @@ public class DroneController : MonoBehaviour
 
         rb.AddForce(dir * moveForce, ForceMode.Acceleration);
 
-        Quaternion face =
-            Quaternion.LookRotation(new Vector3(dir.x,0,dir.z));
+        Quaternion targetRot = Quaternion.LookRotation(dir);
 
         rb.MoveRotation(
             Quaternion.Slerp(
                 rb.rotation,
-                face,
-                rotationSpeed * Time.fixedDeltaTime));
-
-        Tilt(dir);
-    }
-
-    void Tilt(Vector3 dir)
-    {
-        if (dir.sqrMagnitude < 0.01f) return;
-
-        float pitch =
-            Vector3.Dot(dir, transform.forward) * -maxPitch;
-
-        float roll =
-            Vector3.Dot(dir, transform.right) * maxRoll;
-
-        Quaternion bank =
-            Quaternion.Euler(
-                pitch,
-                rb.rotation.eulerAngles.y,
-                -roll);
-
-        rb.MoveRotation(
-            Quaternion.Slerp(
-                rb.rotation,
-                bank,
-                rotationSpeed * Time.fixedDeltaTime));
+                targetRot,
+                2f * Time.fixedDeltaTime));
     }
 }
