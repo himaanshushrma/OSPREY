@@ -1864,13 +1864,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 701150944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.10452846, y: 0, z: 0, w: 0.9945219}
-  m_LocalPosition: {x: 0, y: 2.5, z: -6}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 5, z: -14}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 488573392}
-  m_LocalEulerAnglesHint: {x: 12, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &744519389
 GameObject:
   m_ObjectHideFlags: 0
@@ -4501,7 +4501,7 @@ Camera:
   m_ShutterSpeed: 0.005
   m_Aperture: 16
   m_FocusDistance: 10
-  m_FocalLength: 50
+  m_FocalLength: 17.137775
   m_BladeCount: 5
   m_Curvature: {x: 2, y: 11}
   m_BarrelClipping: 0.25
@@ -4516,7 +4516,7 @@ Camera:
     height: 1
   near clip plane: 0.3
   far clip plane: 1000
-  field of view: 26.991467
+  field of view: 70.00001
   orthographic: 0
   orthographic size: 5
   m_Depth: 0
@@ -4542,13 +4542,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1823688464}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.0048186686, y: 0.9999884, z: -0, w: 0}
-  m_LocalPosition: {x: 0, y: 1, z: 12}
+  m_LocalRotation: {x: 0.13052616, y: 0, z: 0, w: 0.9914449}
+  m_LocalPosition: {x: 0, y: 5, z: -14}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 180, z: 0.552}
+  m_LocalEulerAnglesHint: {x: 15, y: 0, z: 0}
 --- !u!114 &1823688468
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4700,8 +4700,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f5a7ba0241c7cec479c56eea25ef605e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CameraManager
-  swarm: {fileID: 1715263248}
+  leader: {fileID: 2087979821}
   chaseCam: {fileID: 701150945}
+  tacticalAnchor: {fileID: 268419717}
   smooth: 8
 --- !u!1 &1852389454
 GameObject:
@@ -5201,16 +5202,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneController
   mode: 0
-  waypointManager: {fileID: 1720758160}
   targetHeight: 3
-  hoverForce: 30
-  damping: 8
-  moveForce: 10
+  hoverSpeed: 6
+  moveSpeed: 8
   yawSpeed: 80
+  acceleration: 8
   maxPitch: 20
   maxRoll: 18
-  tiltSpeed: 5
-  arriveDistance: 0.5
+  tiltSmooth: 8
 --- !u!114 &2087979826
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5227,7 +5226,7 @@ MonoBehaviour:
   avoidStrength: 10
   obstacleMask:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 8
 --- !u!1 &2130974491
 GameObject:
   m_ObjectHideFlags: 0
