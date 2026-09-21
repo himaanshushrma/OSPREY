@@ -1,150 +1,168 @@
-# OSPREY — Swarm UAV Simulation
+# OSPREY
 
-> Version 0.4.1 (Unity 6 LTS)
+### Operational Swarm Platform for Reconnaissance, Exploration & Yield
 
-OSPREY is a command-and-control UAV swarm simulator built in Unity. The project focuses on autonomous formation flight, tactical camera systems, obstacle sensing, and AI-ready swarm architecture.
-
----
-
-## Features
-
-- Manual leader drone flight
-- Autonomous follower drones
-- V-formation system
-- Dual camera modes
-- Real-time HUD
-- 3-ray obstacle sensing
-- Physics-based quadcopter movement
-- Modular AI architecture
+A Unity 6 LTS–based UAV swarm simulation platform for autonomous formation flight, tactical surveillance, command-and-control operations, and AI-ready drone research.
 
 ---
 
-## Controls
+## About OSPREY
+
+**OSPREY** is a modular drone swarm simulator that recreates how multiple unmanned aerial vehicles coordinate, navigate, and operate as a single intelligent system.
+
+The project combines realistic quadcopter physics, autonomous follower drones, tactical camera systems, live telemetry, and obstacle sensing inside a Unity HDRP environment.
+
+Its architecture is designed so future AI modules can be integrated without changing the simulation core.
+
+---
+
+## What OSPREY stands for
+
+| Letter | Meaning |
+|---------|---------|
+| **O** | **Operational** — realistic UAV mission execution and testing |
+| **S** | **Swarm** — coordinated multi-drone autonomous flight |
+| **P** | **Platform** — modular simulation framework |
+| **R** | **Reconnaissance** — surveillance and observation missions |
+| **E** | **Exploration** — navigation through unknown environments |
+| **Y** | **Yield** — successful mission completion through coordinated behavior |
+
+---
+
+# Features
+
+- Autonomous leader–follower swarm architecture
+- Physics-based quadcopter flight
+- V-formation flight
+- Manual leader control
+- Chase camera
+- Tactical overhead camera
+- Live HUD (Altitude, Speed, Battery & Heading)
+- 3-ray obstacle sensing system
+- HDRP simulation environment
+- Modular AI-ready codebase
+
+---
+
+# Controls
 
 | Key | Action |
 |------|--------|
-| W A S D | Move leader |
-| Q / E | Rotate |
-| Space | Ascend |
-| Left Shift | Descend |
-| C | Chase Camera |
-| V | Tactical Camera |
-| M | Manual Mode |
-| L | Leader Mode |
+| **W A S D** | Move leader drone |
+| **Q / E** | Rotate (Yaw) |
+| **Space** | Ascend |
+| **Left Shift** | Descend |
+| **C** | Chase Camera |
+| **V** | Tactical Camera |
+| **M** | Manual Flight Mode |
+| **L** | Leader Control Mode |
 
 ---
 
-## Project Structure
+# System Architecture
 
+```text
+                  OSPREY
+
+            Main Simulation Scene
+                     │
+     ┌───────────────┼───────────────┐
+     │               │               │
+ Leader Drone   Swarm Manager   Formation Manager
+     │               │               │
+     └───────────────┼───────────────┘
+                     │
+             Follower Drones
+                     │
+          Obstacle Avoidance Sensors
+                     │
+               Unity HDRP Physics
+```
+
+---
+
+# Project Structure
+
+```text
 Assets/
-
-Scripts/
-
-DroneController.cs
-
-FollowerDrone.cs
-
-SwarmManager.cs
-
-FormationManager.cs
-
-CameraManager.cs
-
-ObstacleAvoidance.cs
-
-HUDController.cs
-
-Prefabs/
-
-DronePrefab
-
-Scenes/
-
-MainSimulation
+│
+├── Prefabs/
+│   └── DronePrefab
+│
+├── Scripts/
+│   ├── DroneController.cs
+│   ├── FollowerDrone.cs
+│   ├── SwarmManager.cs
+│   ├── FormationManager.cs
+│   ├── CameraManager.cs
+│   ├── ObstacleAvoidance.cs
+│   └── HUDController.cs
+│
+├── Materials/
+├── Scenes/
+│   └── MainSimulation
+│
+└── Resources/
+```
 
 ---
 
-## Camera Modes
+# Current Version — v0.4.1
 
-### Chase Camera
-- Third-person cinematic view
-- Follows the leader smoothly
-- Shows the complete swarm
-
-### Tactical Camera
-- Top-down battlefield overview
-- Automatically frames the swarm
-- Designed for command-and-control operations
-
----
-
-## Swarm Architecture
-
-Leader Drone
-
-↓
-
-Swarm Manager
-
-↓
-
-Formation Manager
-
-↓
-
-Follower Drones
-
-↓
-
-Obstacle Sensors
-
-Each follower calculates its formation offset while maintaining separation and obstacle awareness.
-
----
-
-## Current Milestone (v0.4.1)
+### Completed
 
 - [x] Drone physics
 - [x] Leader controls
-- [x] V formation
 - [x] Swarm spawning
-- [x] HUD
+- [x] V formation
 - [x] Chase camera
 - [x] Tactical camera
+- [x] HUD telemetry
 - [x] 3-ray obstacle sensing
 
 ---
 
-## Roadmap
+# Roadmap
 
-### Version 0.5
+## Version 0.5
+
 - AI obstacle avoidance
 - Formation recovery
 - Dynamic spacing
 - Collision-free navigation
 
-### Version 1.0
+## Version 0.8
+
 - Waypoint missions
-- GPS navigation
+- Autonomous patrol routes
 - Multi-formation switching
-- Autonomous reconnaissance
-- Mission recording & replay
+- Mission recording
+
+## Version 1.0
+
+- Fully autonomous swarm navigation
+- Search & reconnaissance missions
+- Computer vision integration
+- Real-time command interface
 
 ---
 
-## Built With
+# Technologies
 
-- Unity 6 LTS
-- C#
-- HDRP
-- Rigidbody Physics
+- **Engine:** Unity 6 LTS
+- **Language:** C#
+- **Render Pipeline:** HDRP
+- **Physics:** Rigidbody
+- **Architecture:** Component-based modular system
 
 ---
 
-## Author
+# Author
 
 **Himanshu Sharma**
 
-M.Tech CSE • JC Bose University of Science & Technology
+M.Tech — Computer Science & Engineering
 
-Project: OSPREY Swarm Simulation
+JC Bose University of Science & Technology
+
+**Project:** OSPREY — Operational Swarm Platform for Reconnaissance, Exploration & Yield
