@@ -1153,6 +1153,7 @@ GameObject:
   - component: {fileID: 8608048806666771307}
   - component: {fileID: 3293561476021553421}
   - component: {fileID: 3975284347120258692}
+  - component: {fileID: 8210518289079371702}
   m_Layer: 0
   m_Name: DronePrefab
   m_TagString: Untagged
@@ -1247,13 +1248,31 @@ MonoBehaviour:
   mode: 0
   waypointManager: {fileID: 0}
   targetHeight: 2
-  hoverKp: 30
-  hoverKd: 10
+  hoverForce: 30
+  damping: 8
   moveForce: 8
-  yawTorque: 3
+  yawSpeed: 80
   maxPitch: 20
   maxRoll: 18
-  attitudeSpeed: 5
+  tiltSpeed: 5
+  arriveDistance: 0.5
+--- !u!114 &8210518289079371702
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5293343528310426367}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4cd323f27174977409dfc0cabdce01af, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ObstacleAvoidance
+  rayDistance: 4
+  avoidForce: 12
+  obstacleMask:
+    serializedVersion: 2
+    m_Bits: 8
 --- !u!1 &6456258065735332252
 GameObject:
   m_ObjectHideFlags: 0
