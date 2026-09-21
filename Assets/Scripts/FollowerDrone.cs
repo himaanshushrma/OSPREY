@@ -1,83 +1,73 @@
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
-[RequireComponent(typeof(ObstacleAvoidance))]
 public class FollowerDrone : MonoBehaviour
 {
-    [Header("References")]
     public Transform leader;
     public FormationManager formation;
     public int droneID;
 
-    [Header("Movement")]
-    public float moveForce = 8f;
-    public float hoverKp = 30f;
-    public float hoverKd = 10f;
-    public float rotationSpeed = 4f;
+    [Header("Flight")]
+    public float maxSpeed = 8f;
+    public float followGain = 6f;
+    public float hoverGain = 8f;
+    public float rotationSpeed = 8f;
 
     Rigidbody rb;
+    Rigidbody leaderRb;
     ObstacleAvoidance sensor;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
+        leaderRb = leader.GetComponent<Rigidbody>();
         sensor = GetComponent<ObstacleAvoidance>();
 
-        rb.mass = 1.8f;
-        rb.linearDamping = 2f;
-        rb.angularDamping = 4f;
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.useGravity = false;
+        rb.linearDamping = 0;
+        rb.angularDamping = 4;
     }
 
     void FixedUpdate()
     {
-        if (leader == null || formation == null)
-            return;
+        if (leader == null || formation == null) return;
 
-        Vector3 target = leader.TransformPoint(formation.GetOffset(droneID));
+        Vector3 target =
+            leader.TransformPoint(formation.GetOffset(droneID));
 
-        Hover(target.y);
-        Move(target);
+        Fly(target);
     }
 
-    void Hover(float targetHeight)
+    void Fly(Vector3 target)
     {
-        float error = targetHeight - transform.position.y;
+        // Desired velocity = leader velocity
+        Vector3 desired = leaderRb.linearVelocity;
 
-        float lift = error * hoverKp -
-                     rb.linearVelocity.y * hoverKd;
-
-        rb.AddForce(Vector3.up * lift, ForceMode.Acceleration);
-    }
-
-    void Move(Vector3 target)
-    {
-        // Formation target
-        Vector3 desired = target - transform.position;
-        desired.y = 0;
-
-        if (desired.magnitude > 0.1f)
-            desired.Normalize();
+        // Correction toward formation slot
+        Vector3 error = target - transform.position;
+        desired += error * followGain;
 
         // Obstacle avoidance
-        Vector3 avoid = Vector3.zero;
-
         if (sensor != null)
-            avoid = sensor.GetAvoidanceForce();
+            desired += sensor.GetAvoidanceForce();
 
-        // Blend both behaviours
-        Vector3 direction = desired + avoid * 1.5f;
-        direction.y = 0;
+        desired.y = error.y * hoverGain;
 
-        if (direction.sqrMagnitude > 0.01f)
-            direction.Normalize();
+        if (desired.magnitude > maxSpeed)
+            desired = desired.normalized * maxSpeed;
 
-        rb.AddForce(direction * moveForce, ForceMode.Acceleration);
+        // Instant velocity matching
+        rb.linearVelocity = Vector3.Lerp(
+            rb.linearVelocity,
+            desired,
+            8f * Time.fixedDeltaTime);
 
-        // Rotate towards movement
-        if (direction != Vector3.zero)
+        Vector3 look = rb.linearVelocity;
+        look.y = 0;
+
+        if (look.sqrMagnitude > 0.05f)
         {
-            Quaternion rot = Quaternion.LookRotation(direction);
+            Quaternion rot = Quaternion.LookRotation(look);
 
             rb.MoveRotation(
                 Quaternion.Slerp(

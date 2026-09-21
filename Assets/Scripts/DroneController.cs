@@ -3,177 +3,107 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class DroneController : MonoBehaviour
 {
-    public enum FlightMode
-    {
-        Manual,
-        Leader
-    }
+    public enum Mode { Manual, LeaderMission }
 
     [Header("Mode")]
-    public FlightMode mode = FlightMode.Manual;
-    public WaypointManager waypointManager;
+    public Mode mode = Mode.Manual;
 
     [Header("Hover")]
     public float targetHeight = 2f;
-    public float hoverForce = 30f;
-    public float damping = 8f;
+    public float hoverSpeed = 6f;
 
     [Header("Movement")]
-    public float moveForce = 8f;
-    public float yawSpeed = 80f;
+    public float moveSpeed = 8f;
+    public float yawSpeed = 90f;
+    public float acceleration = 8f;
 
     [Header("Tilt")]
     public float maxPitch = 18f;
     public float maxRoll = 15f;
-    public float tiltSpeed = 5f;
-
-    [Header("Mission")]
-    public float arriveDistance = 0.5f;
+    public float tiltSmooth = 8f;
 
     Rigidbody rb;
 
-    float pitch;
-    float roll;
-    int waypointIndex = 0;
+    float forward;
+    float right;
+    float yawInput;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
 
-        rb.useGravity = true;
-        rb.linearDamping = 2f;
-        rb.angularDamping = 4f;
+        rb.useGravity = false;
+        rb.linearDamping = 0;
+        rb.angularDamping = 4;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
     }
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.M))
-        {
-            mode = FlightMode.Manual;
-            Debug.Log("MANUAL MODE");
-        }
+        if (mode != Mode.Manual) return;
 
-        if (Input.GetKeyDown(KeyCode.L))
-        {
-            mode = FlightMode.Leader;
-            Debug.Log("LEADER MODE");
-        }
+        forward = 0;
+        right = 0;
+        yawInput = 0;
+
+        if (Input.GetKey(KeyCode.W)) forward = 1;
+        if (Input.GetKey(KeyCode.S)) forward = -1;
+
+        if (Input.GetKey(KeyCode.D)) right = 1;
+        if (Input.GetKey(KeyCode.A)) right = -1;
+
+        if (Input.GetKey(KeyCode.E)) yawInput = 1;
+        if (Input.GetKey(KeyCode.Q)) yawInput = -1;
+
+        if (Input.GetKey(KeyCode.Space))
+            targetHeight += 3f * Time.deltaTime;
+
+        if (Input.GetKey(KeyCode.LeftShift))
+            targetHeight -= 3f * Time.deltaTime;
+
+        targetHeight = Mathf.Clamp(targetHeight, 1f, 20f);
     }
 
     void FixedUpdate()
     {
-        Hover();
-
-        if (mode == FlightMode.Manual)
-            ManualControl();
-        else
-            LeaderMission();
+        Fly();
     }
 
-    void Hover()
+    void Fly()
     {
-        float error = targetHeight - transform.position.y;
-        float lift = error * hoverForce - rb.linearVelocity.y * damping;
+        // Horizontal velocity
+        Vector3 desired =
+            transform.forward * forward * moveSpeed +
+            transform.right * right * moveSpeed;
 
-        rb.AddForce(Vector3.up * lift, ForceMode.Acceleration);
-    }
+        // Vertical velocity
+        desired.y =
+            (targetHeight - transform.position.y) * hoverSpeed;
 
-    void ManualControl()
-    {
-        Vector3 move = Vector3.zero;
+        rb.linearVelocity = Vector3.Lerp(
+            rb.linearVelocity,
+            desired,
+            acceleration * Time.fixedDeltaTime);
 
-        // Forward / Back
-        if (Input.GetKey(KeyCode.W))
-        {
-            move += transform.forward;
-            pitch = -maxPitch;
-        }
-        else if (Input.GetKey(KeyCode.S))
-        {
-            move -= transform.forward;
-            pitch = maxPitch;
-        }
-        else
-            pitch = 0;
+        // Rotation
+        transform.Rotate(
+            0,
+            yawInput * yawSpeed * Time.fixedDeltaTime,
+            0);
 
-        // Left / Right
-        if (Input.GetKey(KeyCode.A))
-        {
-            move -= transform.right;
-            roll = maxRoll;
-        }
-        else if (Input.GetKey(KeyCode.D))
-        {
-            move += transform.right;
-            roll = -maxRoll;
-        }
-        else
-            roll = 0;
+        float pitch = -forward * maxPitch;
+        float roll = -right * maxRoll;
 
-        move.Normalize();
-        rb.AddForce(move * moveForce, ForceMode.Acceleration);
-
-        // Altitude
-        if (Input.GetKey(KeyCode.Space))
-            targetHeight += 0.04f;
-
-        if (Input.GetKey(KeyCode.LeftShift))
-            targetHeight -= 0.04f;
-
-        targetHeight = Mathf.Clamp(targetHeight, 1f, 20f);
-
-        // Yaw
-        float yaw = 0;
-
-        if (Input.GetKey(KeyCode.Q))
-            yaw = -yawSpeed;
-
-        if (Input.GetKey(KeyCode.E))
-            yaw = yawSpeed;
-
-        Quaternion targetRot = Quaternion.Euler(
-            pitch,
-            transform.eulerAngles.y + yaw * Time.fixedDeltaTime,
-            roll);
+        Quaternion body =
+            Quaternion.Euler(
+                pitch,
+                transform.eulerAngles.y,
+                roll);
 
         rb.MoveRotation(
             Quaternion.Slerp(
                 rb.rotation,
-                targetRot,
-                tiltSpeed * Time.fixedDeltaTime));
-    }
-
-    void LeaderMission()
-    {
-        if (waypointManager == null || waypointManager.Count == 0)
-            return;
-
-        Transform wp = waypointManager.GetWaypoint(waypointIndex);
-
-        Vector3 target = new Vector3(
-            wp.position.x,
-            transform.position.y,
-            wp.position.z);
-
-        Vector3 dir = target - transform.position;
-
-        if (dir.magnitude < arriveDistance)
-        {
-            waypointIndex = (waypointIndex + 1) % waypointManager.Count;
-            return;
-        }
-
-        dir.Normalize();
-
-        rb.AddForce(dir * moveForce, ForceMode.Acceleration);
-
-        Quaternion targetRot = Quaternion.LookRotation(dir);
-
-        rb.MoveRotation(
-            Quaternion.Slerp(
-                rb.rotation,
-                targetRot,
-                2f * Time.fixedDeltaTime));
+                body,
+                tiltSmooth * Time.fixedDeltaTime));
     }
 }
