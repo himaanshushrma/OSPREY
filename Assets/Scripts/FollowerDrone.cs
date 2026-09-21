@@ -55,29 +55,34 @@ public class FollowerDrone : MonoBehaviour
     }
 
     void Move(Vector3 target)
+{
+    Vector3 desired = target - transform.position;
+    desired.y = 0;
+
+    if (desired.magnitude > 0.1f)
+        desired.Normalize();
+
+    // Read obstacle sensors
+    ObstacleAvoidance sensor = GetComponent<ObstacleAvoidance>();
+
+    Vector3 avoid = Vector3.zero;
+
+    if (sensor != null)
+        avoid = sensor.GetAvoidanceForce();
+
+    // Blend formation + avoidance
+    Vector3 direction = desired + avoid * 1.5f;
+
+    direction.y = 0;
+
+    if (direction.sqrMagnitude > 0.01f)
+        direction.Normalize();
+
+    rb.AddForce(direction * moveForce, ForceMode.Acceleration);
+
+    if (direction != Vector3.zero)
     {
-        Vector3 dir = target - transform.position;
-        dir.y = 0;
-
-        if (dir.magnitude < 0.3f)
-            return;
-
-        // Formation direction
-        dir.Normalize();
-
-        // Obstacle avoidance
-        Vector3 avoidForce = Vector3.zero;
-        if (avoid != null)
-            avoidForce = avoid.GetAvoidanceForce() * 0.20f;
-
-        // Final steering
-        Vector3 steering = (dir + avoidForce).normalized;
-
-        rb.AddForce(
-            steering * moveForce,
-            ForceMode.Acceleration);
-
-        Quaternion rot = Quaternion.LookRotation(steering);
+        Quaternion rot = Quaternion.LookRotation(direction);
 
         rb.MoveRotation(
             Quaternion.Slerp(
