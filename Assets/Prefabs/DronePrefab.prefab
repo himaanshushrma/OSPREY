@@ -1250,7 +1250,7 @@ MonoBehaviour:
   targetHeight: 2
   hoverForce: 30
   damping: 8
-  moveForce: 8
+  moveForce: 10
   yawSpeed: 80
   maxPitch: 20
   maxRoll: 18
@@ -1269,7 +1269,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ObstacleAvoidance
   rayDistance: 4
-  avoidForce: 12
+  avoidStrength: 10
   obstacleMask:
     serializedVersion: 2
     m_Bits: 8
