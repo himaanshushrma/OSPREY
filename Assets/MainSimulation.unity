@@ -5000,11 +5000,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 130792ce4cbe9404abe2851f94d21c74, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MissionManager
-  state: 0
   leader: {fileID: 2087979825}
   waypointManager: {fileID: 1860741050}
   cruiseHeight: 5
   startKey: 112
+  state: 0
 --- !u!4 &1860741052
 Transform:
   m_ObjectHideFlags: 0
@@ -5401,8 +5401,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b0945f9588aa4404a938d12ecf61292c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneController
-  mode: 1
-  targetHeight: 3
+  mode: 0
+  targetHeight: 2
   hoverSpeed: 6
   moveSpeed: 8
   yawSpeed: 80
@@ -5410,6 +5410,8 @@ MonoBehaviour:
   currentWaypoint: {fileID: 0}
   waypointSpeed: 6
   reachDistance: 1.5
+  steeringGain: 4
+  maxTurnRate: 90
   maxPitch: 20
   maxRoll: 18
   tiltSmooth: 8

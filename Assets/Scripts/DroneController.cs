@@ -9,7 +9,7 @@ public class DroneController : MonoBehaviour
         Auto
     }
 
-    [Header("Mode")]
+    [Header("Flight Mode")]
     public Mode mode = Mode.Manual;
 
     [Header("Hover")]
@@ -26,6 +26,11 @@ public class DroneController : MonoBehaviour
     public float waypointSpeed = 6f;
     public float reachDistance = 1.5f;
 
+    [Range(1f,10f)]
+    public float steeringGain = 4f;
+
+    public float maxTurnRate = 90f;
+
     [Header("Tilt")]
     public float maxPitch = 20f;
     public float maxRoll = 18f;
@@ -33,9 +38,9 @@ public class DroneController : MonoBehaviour
 
     Rigidbody rb;
 
-    float forward;
-    float right;
-    float yaw;
+    float forwardInput;
+    float rightInput;
+    float yawInput;
 
     void Start()
     {
@@ -52,24 +57,24 @@ public class DroneController : MonoBehaviour
         if (mode != Mode.Manual)
             return;
 
-        forward = 0;
-        right = 0;
-        yaw = 0;
+        forwardInput = 0;
+        rightInput = 0;
+        yawInput = 0;
 
-        if (Input.GetKey(KeyCode.W)) forward = 1;
-        if (Input.GetKey(KeyCode.S)) forward = -1;
+        if (Input.GetKey(KeyCode.W)) forwardInput = 1;
+        if (Input.GetKey(KeyCode.S)) forwardInput = -1;
 
-        if (Input.GetKey(KeyCode.D)) right = 1;
-        if (Input.GetKey(KeyCode.A)) right = -1;
+        if (Input.GetKey(KeyCode.D)) rightInput = 1;
+        if (Input.GetKey(KeyCode.A)) rightInput = -1;
 
-        if (Input.GetKey(KeyCode.E)) yaw = 1;
-        if (Input.GetKey(KeyCode.Q)) yaw = -1;
+        if (Input.GetKey(KeyCode.E)) yawInput = 1;
+        if (Input.GetKey(KeyCode.Q)) yawInput = -1;
 
         if (Input.GetKey(KeyCode.Space))
-            targetHeight += 3 * Time.deltaTime;
+            targetHeight += 3f * Time.deltaTime;
 
         if (Input.GetKey(KeyCode.LeftShift))
-            targetHeight -= 3 * Time.deltaTime;
+            targetHeight -= 3f * Time.deltaTime;
     }
 
     void FixedUpdate()
@@ -82,33 +87,32 @@ public class DroneController : MonoBehaviour
 
     void FlyManual()
     {
-        Vector3 desired =
-            transform.forward * forward * moveSpeed +
-            transform.right * right * moveSpeed;
+        Vector3 desiredVelocity =
+            transform.forward * forwardInput * moveSpeed +
+            transform.right * rightInput * moveSpeed;
 
-        desired.y =
+        desiredVelocity.y =
             (targetHeight - transform.position.y) * hoverSpeed;
 
         rb.linearVelocity = Vector3.Lerp(
             rb.linearVelocity,
-            desired,
+            desiredVelocity,
             acceleration * Time.fixedDeltaTime);
 
-        transform.Rotate(
-            0,
-            yaw * yawSpeed * Time.fixedDeltaTime,
-            0);
+        float newYaw =
+            transform.eulerAngles.y +
+            yawInput * yawSpeed * Time.fixedDeltaTime;
 
-        Quaternion rot =
+        Quaternion targetRotation =
             Quaternion.Euler(
-                -forward * maxPitch,
-                transform.eulerAngles.y,
-                -right * maxRoll);
+                -forwardInput * maxPitch,
+                newYaw,
+                -rightInput * maxRoll);
 
         rb.MoveRotation(
             Quaternion.Slerp(
                 rb.rotation,
-                rot,
+                targetRotation,
                 tiltSmooth * Time.fixedDeltaTime));
     }
 
@@ -126,9 +130,11 @@ public class DroneController : MonoBehaviour
         Vector3 horizontal =
             new Vector3(direction.x, 0, direction.z);
 
+        // Forward movement
         Vector3 desiredVelocity =
             horizontal.normalized * waypointSpeed;
 
+        // Independent altitude control
         desiredVelocity.y =
             (targetHeight - transform.position.y) * hoverSpeed;
 
@@ -137,16 +143,31 @@ public class DroneController : MonoBehaviour
             desiredVelocity,
             acceleration * Time.fixedDeltaTime);
 
+        // Smooth proportional steering
         if (horizontal.sqrMagnitude > 0.01f)
         {
-            Quaternion rot =
-                Quaternion.LookRotation(horizontal);
+            float targetYaw =
+                Quaternion.LookRotation(horizontal).eulerAngles.y;
 
-            rb.MoveRotation(
-                Quaternion.Slerp(
-                    rb.rotation,
-                    rot,
-                    tiltSmooth * Time.fixedDeltaTime));
+            float currentYaw =
+                transform.eulerAngles.y;
+
+            float headingError =
+                Mathf.DeltaAngle(currentYaw, targetYaw);
+
+            float yawRate =
+                Mathf.Clamp(
+                    headingError * steeringGain,
+                    -maxTurnRate,
+                    maxTurnRate);
+
+            Quaternion newRotation =
+                Quaternion.Euler(
+                    0,
+                    currentYaw + yawRate * Time.fixedDeltaTime,
+                    0);
+
+            rb.MoveRotation(newRotation);
         }
     }
 }

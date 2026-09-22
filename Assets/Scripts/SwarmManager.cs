@@ -1,52 +1,92 @@
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 
 public class SwarmManager : MonoBehaviour
 {
+    [Header("References")]
     public DroneController leader;
     public GameObject dronePrefab;
     public FormationManager formation;
+
+    [Header("Spawn")]
+    [Range(1,20)]
     public int followerCount = 4;
 
-    [HideInInspector]
-    public List<Transform> drones = new();
+    [Header("Followers (Runtime)")]
+    public List<FollowerDrone> followers = new List<FollowerDrone>();
 
     void Start()
     {
-        SpawnSwarm();
+        SpawnFollowers();
     }
 
-    void SpawnSwarm()
+    void SpawnFollowers()
     {
-        if (leader == null || dronePrefab == null || formation == null)
+        foreach (FollowerDrone d in followers)
         {
-            Debug.LogError("Assign Leader, DronePrefab and FormationManager in SwarmManager!");
-            return;
+            if (d != null)
+                Destroy(d.gameObject);
         }
 
-        drones.Clear();
-        drones.Add(leader.transform);
+        followers.Clear();
 
         for (int i = 0; i < followerCount; i++)
         {
-            Vector3 pos = leader.transform.position + formation.GetOffset(i);
+            Vector3 pos =
+                leader.transform.position +
+                formation.GetOffset(i);
 
             GameObject clone = Instantiate(
                 dronePrefab,
                 pos,
                 leader.transform.rotation);
 
-            DroneController dc = clone.GetComponent<DroneController>();
-            if (dc != null) Destroy(dc);
+            clone.name = "Follower_" + (i + 1);
 
-            FollowerDrone fd = clone.GetComponent<FollowerDrone>();
-            if (fd == null) fd = clone.AddComponent<FollowerDrone>();
+            DroneController dc =
+                clone.GetComponent<DroneController>();
 
+            if (dc != null)
+            {
+                dc.mode = DroneController.Mode.Manual;
+                dc.targetHeight = leader.targetHeight;
+            }
+
+            FollowerDrone fd =
+                clone.GetComponent<FollowerDrone>();
+
+            fd.droneID = i;
             fd.leader = leader.transform;
             fd.formation = formation;
-            fd.droneID = i;
+            formation.leader = leader.transform;
 
-            drones.Add(clone.transform);
+            followers.Add(fd);
         }
+    }
+
+    public void SetAllFollowersAuto()
+    {
+        foreach (FollowerDrone f in followers)
+        {
+            DroneController dc = f.GetComponent<DroneController>();
+
+            dc.mode = DroneController.Mode.Auto;
+            dc.targetHeight = leader.targetHeight;
+        }
+
+        Debug.Log("Swarm AUTO");
+    }
+
+    public void SetAllFollowersManual()
+    {
+        foreach (FollowerDrone f in followers)
+        {
+            DroneController dc = f.GetComponent<DroneController>();
+
+            dc.mode = DroneController.Mode.Manual;
+            dc.currentWaypoint = null;
+        }
+
+        Debug.Log("Swarm MANUAL");
     }
 }

@@ -3,77 +3,74 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class FollowerDrone : MonoBehaviour
 {
+    [Header("References")]
     public Transform leader;
     public FormationManager formation;
+
+    [Header("Identity")]
     public int droneID;
 
     [Header("Flight")]
-    public float maxSpeed = 8f;
-    public float followGain = 6f;
-    public float hoverGain = 8f;
-    public float rotationSpeed = 8f;
+    public float maxSpeed = 12f;
+    public float followGain = 12f;
+    public float hoverGain = 10f;
+    public float rotationSpeed = 12f;
 
     Rigidbody rb;
-    Rigidbody leaderRb;
-    ObstacleAvoidance sensor;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
-        leaderRb = leader.GetComponent<Rigidbody>();
-        sensor = GetComponent<ObstacleAvoidance>();
 
         rb.useGravity = false;
-        rb.linearDamping = 0;
-        rb.angularDamping = 4;
+        rb.linearDamping = 1.5f;
+        rb.angularDamping = 4f;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
     }
 
     void FixedUpdate()
     {
-        if (leader == null || formation == null) return;
+        if (leader == null || formation == null)
+            return;
 
+        // Formation offset in LEADER LOCAL SPACE
+        Vector3 localOffset = formation.GetOffset(droneID);
+
+        // Convert local offset into world position
         Vector3 target =
-            leader.TransformPoint(formation.GetOffset(droneID));
+            leader.position +
+            leader.right * localOffset.x +
+            leader.up * localOffset.y +
+            leader.forward * localOffset.z;
 
-        Fly(target);
-    }
-
-    void Fly(Vector3 target)
-    {
-        // Desired velocity = leader velocity
-        Vector3 desired = leaderRb.linearVelocity;
-
-        // Correction toward formation slot
+        // Position error
         Vector3 error = target - transform.position;
-        desired += error * followGain;
 
-        // Obstacle avoidance
-        if (sensor != null)
-            desired += sensor.GetAvoidanceForce();
+        // Horizontal movement
+        Vector3 velocity = error * followGain;
 
-        desired.y = error.y * hoverGain;
+        // Altitude correction
+        velocity.y = error.y * hoverGain;
 
-        if (desired.magnitude > maxSpeed)
-            desired = desired.normalized * maxSpeed;
+        // Clamp speed
+        velocity = Vector3.ClampMagnitude(velocity, maxSpeed);
 
-        // Instant velocity matching
         rb.linearVelocity = Vector3.Lerp(
             rb.linearVelocity,
-            desired,
-            8f * Time.fixedDeltaTime);
+            velocity,
+            10f * Time.fixedDeltaTime);
 
-        Vector3 look = rb.linearVelocity;
-        look.y = 0;
+        // Match leader heading
+        Quaternion targetRot =
+            Quaternion.Euler(
+                0,
+                leader.eulerAngles.y,
+                0);
 
-        if (look.sqrMagnitude > 0.05f)
-        {
-            Quaternion rot = Quaternion.LookRotation(look);
-
-            rb.MoveRotation(
-                Quaternion.Slerp(
-                    rb.rotation,
-                    rot,
-                    rotationSpeed * Time.fixedDeltaTime));
-        }
+        rb.MoveRotation(
+            Quaternion.Slerp(
+                rb.rotation,
+                targetRot,
+                rotationSpeed * Time.fixedDeltaTime));
     }
 }
