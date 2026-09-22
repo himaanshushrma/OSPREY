@@ -2001,6 +2001,52 @@ Transform:
   m_Children: []
   m_Father: {fileID: 488573392}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &715302890
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 715302892}
+  - component: {fileID: 715302891}
+  m_Layer: 0
+  m_Name: PathPlanner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &715302891
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 715302890}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 20ff043931692ff42b483b47bea8522a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PathPlanner
+  controlDistance: 4
+  samples: 40
+--- !u!4 &715302892
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 715302890}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 28.97984, y: 2, z: 9.03643}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &744519389
 GameObject:
   m_ObjectHideFlags: 0
@@ -3356,6 +3402,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d04d03d7e435f7c4ea8e356d69b606b3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FormationManager
+  leader: {fileID: 0}
   currentFormation: 0
   spacing: 2.5
 --- !u!4 &1363843569
@@ -3503,6 +3550,58 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1399500047}
   m_Mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &1483516257
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1483516259}
+  - component: {fileID: 1483516258}
+  m_Layer: 0
+  m_Name: MissionManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1483516258
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1483516257}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 130792ce4cbe9404abe2851f94d21c74, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MissionManager
+  leader: {fileID: 2087979825}
+  waypointManager: {fileID: 1860741050}
+  swarm: {fileID: 1715263248}
+  planner: {fileID: 715302891}
+  cruiseHeight: 8
+  startKey: 112
+  cancelKey: 27
+  state: 1
+--- !u!4 &1483516259
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1483516257}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 35.3237, y: 5.15, z: 10.54455}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1534035215
 GameObject:
   m_ObjectHideFlags: 0
@@ -4404,8 +4503,18 @@ MonoBehaviour:
   leader: {fileID: 2087979825}
   dronePrefab: {fileID: 5293343528310426367, guid: c5fb3808c4e49474abbeb186ff08e5e4, type: 3}
   formation: {fileID: 1363843568}
-  followerCount: 4
-  drones: []
+  followerCount: 7
+  followers:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
 --- !u!4 &1715263249
 Transform:
   m_ObjectHideFlags: 0
@@ -5002,8 +5111,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MissionManager
   leader: {fileID: 2087979825}
   waypointManager: {fileID: 1860741050}
+  swarm: {fileID: 1715263248}
+  planner: {fileID: 715302891}
   cruiseHeight: 5
   startKey: 112
+  cancelKey: 27
   state: 0
 --- !u!4 &1860741052
 Transform:
@@ -5411,6 +5523,7 @@ MonoBehaviour:
   waypointSpeed: 6
   reachDistance: 1.5
   steeringGain: 4
+  derivativeGain: 1.2
   maxTurnRate: 90
   maxPitch: 20
   maxRoll: 18
@@ -5561,3 +5674,5 @@ SceneRoots:
   - {fileID: 1715263249}
   - {fileID: 1363843569}
   - {fileID: 1860741052}
+  - {fileID: 715302892}
+  - {fileID: 1483516259}

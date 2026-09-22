@@ -9,27 +9,27 @@ public class DroneController : MonoBehaviour
         Auto
     }
 
-    [Header("Flight Mode")]
+    [Header("Mode")]
     public Mode mode = Mode.Manual;
 
-    [Header("Hover")]
-    public float targetHeight = 2f;
-    public float hoverSpeed = 6f;
+    [Header("Altitude")]
+    public float targetHeight = 5f;
+    public float hoverGain = 5f;
 
-    [Header("Manual Flight")]
+    [Header("Manual")]
     public float moveSpeed = 8f;
-    public float yawSpeed = 80f;
-    public float acceleration = 8f;
+    public float yawSpeed = 90f;
 
-    [Header("Auto Flight")]
+    [Header("Autonomous")]
     public Transform currentWaypoint;
-    public float waypointSpeed = 6f;
-    public float reachDistance = 1.5f;
+    public float cruiseSpeed = 7f;
+    public float minSpeed = 3f;
+    public float reachDistance = 0.5f;
 
-    [Range(1f,10f)]
-    public float steeringGain = 4f;
-
-    public float maxTurnRate = 90f;
+    [Header("PID Steering")]
+    public float kp = 3.5f;
+    public float kd = 1.0f;
+    public float maxYawRate = 120f;
 
     [Header("Tilt")]
     public float maxPitch = 20f;
@@ -38,136 +38,182 @@ public class DroneController : MonoBehaviour
 
     Rigidbody rb;
 
-    float forwardInput;
-    float rightInput;
-    float yawInput;
+    float previousError;
 
-    void Start()
+    void Awake()
     {
         rb = GetComponent<Rigidbody>();
 
         rb.useGravity = false;
-        rb.linearDamping = 0;
-        rb.angularDamping = 4;
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-    }
-
-    void Update()
-    {
-        if (mode != Mode.Manual)
-            return;
-
-        forwardInput = 0;
-        rightInput = 0;
-        yawInput = 0;
-
-        if (Input.GetKey(KeyCode.W)) forwardInput = 1;
-        if (Input.GetKey(KeyCode.S)) forwardInput = -1;
-
-        if (Input.GetKey(KeyCode.D)) rightInput = 1;
-        if (Input.GetKey(KeyCode.A)) rightInput = -1;
-
-        if (Input.GetKey(KeyCode.E)) yawInput = 1;
-        if (Input.GetKey(KeyCode.Q)) yawInput = -1;
-
-        if (Input.GetKey(KeyCode.Space))
-            targetHeight += 3f * Time.deltaTime;
-
-        if (Input.GetKey(KeyCode.LeftShift))
-            targetHeight -= 3f * Time.deltaTime;
+        rb.linearDamping = 1.5f;
+        rb.angularDamping = 5f;
     }
 
     void FixedUpdate()
     {
+        HoverPID();
+
         if (mode == Mode.Manual)
-            FlyManual();
+            ManualFlight();
         else
-            FlyAuto();
+            PurePursuitFlight();
+
+        ApplyTilt();
     }
 
-    void FlyManual()
+    // -------------------------------------------------
+    // ALTITUDE PID
+    // -------------------------------------------------
+
+    void HoverPID()
     {
-        Vector3 desiredVelocity =
-            transform.forward * forwardInput * moveSpeed +
-            transform.right * rightInput * moveSpeed;
+        float error = targetHeight - transform.position.y;
 
-        desiredVelocity.y =
-            (targetHeight - transform.position.y) * hoverSpeed;
+        Vector3 vel = rb.linearVelocity;
+        vel.y = error * hoverGain;
 
-        rb.linearVelocity = Vector3.Lerp(
-            rb.linearVelocity,
-            desiredVelocity,
-            acceleration * Time.fixedDeltaTime);
-
-        float newYaw =
-            transform.eulerAngles.y +
-            yawInput * yawSpeed * Time.fixedDeltaTime;
-
-        Quaternion targetRotation =
-            Quaternion.Euler(
-                -forwardInput * maxPitch,
-                newYaw,
-                -rightInput * maxRoll);
-
-        rb.MoveRotation(
-            Quaternion.Slerp(
-                rb.rotation,
-                targetRotation,
-                tiltSmooth * Time.fixedDeltaTime));
+        rb.linearVelocity = vel;
     }
 
-    void FlyAuto()
+    // -------------------------------------------------
+    // MANUAL
+    // -------------------------------------------------
+
+    void ManualFlight()
+    {
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+
+        Vector3 dir =
+            transform.forward * v +
+            transform.right * h;
+
+        Vector3 vel = rb.linearVelocity;
+
+        vel.x = dir.x * moveSpeed;
+        vel.z = dir.z * moveSpeed;
+
+        rb.linearVelocity = vel;
+
+        float yaw = 0;
+
+        if (Input.GetKey(KeyCode.Q)) yaw = -1;
+        if (Input.GetKey(KeyCode.E)) yaw = 1;
+
+        transform.Rotate(
+            Vector3.up,
+            yaw * yawSpeed * Time.fixedDeltaTime);
+    }
+
+    // -------------------------------------------------
+    // PURE PURSUIT
+    // -------------------------------------------------
+
+    void PurePursuitFlight()
     {
         if (currentWaypoint == null)
-        {
-            rb.linearVelocity = Vector3.zero;
             return;
-        }
 
-        Vector3 direction =
-            currentWaypoint.position - transform.position;
+        Vector3 target =
+            new Vector3(
+                currentWaypoint.position.x,
+                transform.position.y,
+                currentWaypoint.position.z);
 
-        Vector3 horizontal =
-            new Vector3(direction.x, 0, direction.z);
+        Vector3 toTarget = target - transform.position;
 
-        // Forward movement
-        Vector3 desiredVelocity =
-            horizontal.normalized * waypointSpeed;
+        float distance = toTarget.magnitude;
 
-        // Independent altitude control
-        desiredVelocity.y =
-            (targetHeight - transform.position.y) * hoverSpeed;
+        // IMPORTANT:
+        // DO NOT STOP HERE.
+        // MissionManager changes the waypoint.
+        if (distance < reachDistance)
+            return;
 
-        rb.linearVelocity = Vector3.Lerp(
-            rb.linearVelocity,
-            desiredVelocity,
-            acceleration * Time.fixedDeltaTime);
+        float desiredYaw =
+            Mathf.Atan2(
+                toTarget.x,
+                toTarget.z) * Mathf.Rad2Deg;
 
-        // Smooth proportional steering
-        if (horizontal.sqrMagnitude > 0.01f)
-        {
-            float targetYaw =
-                Quaternion.LookRotation(horizontal).eulerAngles.y;
+        float currentYaw = transform.eulerAngles.y;
 
-            float currentYaw =
-                transform.eulerAngles.y;
+        float error =
+            Mathf.DeltaAngle(
+                currentYaw,
+                desiredYaw);
 
-            float headingError =
-                Mathf.DeltaAngle(currentYaw, targetYaw);
+        float derivative =
+            (error - previousError) /
+            Time.fixedDeltaTime;
 
-            float yawRate =
-                Mathf.Clamp(
-                    headingError * steeringGain,
-                    -maxTurnRate,
-                    maxTurnRate);
+        float yawRate =
+            kp * error +
+            kd * derivative;
 
-            Quaternion newRotation =
-                Quaternion.Euler(
-                    0,
-                    currentYaw + yawRate * Time.fixedDeltaTime,
-                    0);
+        yawRate =
+            Mathf.Clamp(
+                yawRate,
+                -maxYawRate,
+                maxYawRate);
 
-            rb.MoveRotation(newRotation);
-        }
+        transform.Rotate(
+            Vector3.up,
+            yawRate * Time.fixedDeltaTime);
+
+        previousError = error;
+
+        float turnFactor =
+            Mathf.Abs(error) / 90f;
+
+        float speed =
+            Mathf.Lerp(
+                cruiseSpeed,
+                minSpeed,
+                turnFactor);
+
+        Vector3 forward =
+            transform.forward * speed;
+
+        Vector3 vel = rb.linearVelocity;
+
+        vel.x = forward.x;
+        vel.z = forward.z;
+
+        rb.linearVelocity = vel;
+    }
+
+    // -------------------------------------------------
+    // VISUAL TILT
+    // -------------------------------------------------
+
+    void ApplyTilt()
+    {
+        Vector3 local =
+            transform.InverseTransformDirection(
+                rb.linearVelocity);
+
+        float pitch =
+            Mathf.Clamp(
+                -local.z * 2.5f,
+                -maxPitch,
+                maxPitch);
+
+        float roll =
+            Mathf.Clamp(
+                -local.x * 2.5f,
+                -maxRoll,
+                maxRoll);
+
+        Quaternion target =
+            Quaternion.Euler(
+                pitch,
+                transform.eulerAngles.y,
+                roll);
+
+        transform.rotation =
+            Quaternion.Slerp(
+                transform.rotation,
+                target,
+                Time.fixedDeltaTime * tiltSmooth);
     }
 }
