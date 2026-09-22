@@ -1,152 +1,186 @@
-# OSPREY - Autonomous Drone Swarm Simulator
+# OSPREY — Autonomous Drone Swarm Simulator
 
-> A Unity-based autonomous UAV swarm simulator implementing PID flight control, Pure Pursuit navigation, Bézier trajectory planning, and matrix-based swarm formations.
+> A Unity 6 autonomous UAV swarm simulator implementing **PID flight control**, **Pure Pursuit navigation**, **Bézier trajectory planning**, and **matrix-based swarm formations**.
 
 ![Unity](https://img.shields.io/badge/Unity-6-black)
 ![Language](https://img.shields.io/badge/C%23-.NET-purple)
-![Status](https://img.shields.io/badge/Status-Active-success)
 ![Version](https://img.shields.io/badge/Version-v1.0-blue)
+![Status](https://img.shields.io/badge/Status-Active-success)
 
 ---
 
-# Overview
+## Project Overview
 
-OSPREY is an autonomous drone swarm simulation project developed in Unity using C#.
+**OSPREY (Operational Swarm Platform for Reconnaissance, Exploration & Yield)** is a robotics-oriented drone swarm simulator built in **Unity** using **C#**.
 
-The project focuses on robotics, autonomous navigation, and swarm coordination principles rather than simple scripted movement.
+Unlike conventional Unity drone projects that rely on scripted movement, OSPREY separates **mission planning**, **trajectory generation**, **flight control**, and **swarm coordination** into independent modules. The project serves as a foundation for future autonomous UAV research including obstacle avoidance, mapping, distributed swarms, and search & rescue.
 
-The simulator implements:
+### Current Capabilities
 
 - Autonomous takeoff and landing
-- PID flight control
+- PID / PD heading controller
 - Pure Pursuit path tracking
-- Bézier trajectory generation
-- Matrix-based swarm formations
-- Finite State Mission System
-- Multi-drone coordination
-
-The objective is to build a foundation for future autonomous systems such as:
-
-- Search & Rescue
-- Obstacle Avoidance
-- Occupancy Grid Mapping
-- Drone-to-Drone Communication
-- AI Tactical Swarms
+- Cubic Bézier trajectory generation
+- Matrix-based formation engine
+- Leader–Follower swarm architecture
+- Runtime formation switching
+- Mission finite state machine (FSM)
 
 ---
 
-# Key Engineering Concepts
+# System Architecture
+
+```text
+                    ┌─────────────────────┐
+                    │   MissionManager    │
+                    │   Mission FSM       │
+                    └─────────┬───────────┘
+                              │
+                              ▼
+                    ┌─────────────────────┐
+                    │    PathPlanner      │
+                    │  Bézier Generator   │
+                    └─────────┬───────────┘
+                              │
+                              ▼
+                    ┌─────────────────────┐
+                    │  DroneController    │
+                    │ PID + Pure Pursuit  │
+                    └─────────┬───────────┘
+                              │
+                              ▼
+                    ┌─────────────────────┐
+                    │    SwarmManager     │
+                    │ Leader + Followers  │
+                    └─────────────────────┘
+```
+
+### Module Responsibilities
+
+| Module | Responsibility |
+|---------|----------------|
+| `MissionManager` | Mission sequencing & FSM |
+| `PathPlanner` | Cubic Bézier trajectory generation |
+| `DroneController` | Manual & autonomous flight control |
+| `SwarmManager` | Follower spawning & coordination |
+| `FormationManager` | Formation geometry |
+| `WaypointManager` | Mission waypoint storage |
+
+---
+
+# Core Engineering Concepts
 
 ## 1. Matrix-Based Formation Engine
 
-Instead of storing world positions for each drone, followers store local offsets relative to the leader.
+Each follower stores a **local offset** relative to the leader rather than a fixed world position.
 
 ### Mathematical Model
 
-P(i) = P(leader) + R × O(i)
+```text
+Pi = Pleader + R × Oi
+```
 
 Where:
 
-- P(i) = follower position
-- P(leader) = leader position
-- R = leader rotation matrix
-- O(i) = formation offset
+- **Pi** = follower position
+- **Pleader** = leader position
+- **R** = leader rotation matrix
+- **Oi** = formation offset
 
-### Benefits
+### Why this approach?
 
-- Unlimited followers
-- Automatic rotation
+The original implementation used hardcoded follower positions, which failed as the swarm grew. Matrix transformations allow formations to rotate naturally with the leader while supporting an arbitrary number of drones.
+
+**Benefits**
+
+- Unlimited follower count
 - Dynamic formation switching
-- Low computational cost
-- Realistic swarm behavior
+- Automatic rotation
+- Low computational overhead
+- Clean separation of geometry and control
 
 ---
 
-## 2. PID Flight Controller
+## 2. PID / PD Flight Controller
 
-The drone heading is controlled using a Proportional-Derivative (PD) controller.
+The autonomous leader uses a **Proportional–Derivative** controller for heading correction.
 
-### Equation
+### Control Equation
 
-u = Kp × e + Kd × de/dt
+```text
+u = Kp·e + Kd(de/dt)
+```
 
 Where:
 
-- e = heading error
-- Kp = proportional gain
-- Kd = derivative gain
+- **e** = heading error
+- **Kp** = proportional gain
+- **Kd** = derivative damping
 
-### Benefits
-
-- Smooth turns
-- Reduced oscillation
-- Stable steering
-- Realistic UAV movement
+This produces smooth turns and eliminates abrupt heading changes.
 
 ---
 
 ## 3. Bézier Trajectory Planning
 
-Straight-line waypoint navigation produces robotic motion.
+Instead of flying directly between waypoints, OSPREY generates smooth cubic Bézier trajectories.
 
-OSPREY generates smooth cubic Bézier curves between waypoints.
+```text
+B(t) = (1-t)³P0
+     + 3(1-t)²tP1
+     + 3(1-t)t²P2
+     + t³P3
+```
 
-### Equation
+The generated curve is sampled into intermediate navigation points for the flight controller.
 
-B(t) = (1-t)^3P0
-     + 3(1-t)^2tP1
-     + 3(1-t)t^2P2
-     + t^3P3
-
-Where:
-
-- P0 = start waypoint
-- P3 = destination waypoint
-- P1,P2 = control points
-
-### Benefits
+**Advantages**
 
 - Smooth trajectories
-- Reduced sharp turns
+- Reduced cornering error
 - Better path tracking
+- Natural UAV movement
 
 ---
 
 ## 4. Pure Pursuit Navigation
 
-The drone follows a look-ahead point on the generated trajectory rather than chasing waypoints directly.
+The drone follows a **look-ahead target** rather than the waypoint itself.
 
-### Equation
+```text
+Closest Path Point
+        │
+        ▼
+  Look Ahead Target
+        │
+        ▼
+   Steering Command
+```
 
-Target = ClosestPoint + LookAheadDistance
+This solved the major navigation bugs encountered during development:
 
-### Benefits
-
-- Eliminates waypoint orbiting
-- Prevents stopping at waypoints
-- Produces continuous movement
+- Waypoint orbiting
+- WP1 freeze
+- Oscillation near targets
+- Abrupt stopping
 
 ---
 
-## 5. Finite State Machine (FSM)
+## 5. Mission Finite State Machine
 
-Mission logic is separated from flight control.
+Mission logic is isolated from flight dynamics.
 
-### Mission States
-
+```text
 Idle
-↓
+ ↓
 Takeoff
-↓
+ ↓
 Patrol
-↓
+ ↓
 Complete
+```
 
-### Benefits
-
-- Modular architecture
-- Easier debugging
-- Scalable mission logic
+Separating **decision making** from **vehicle control** makes the simulator easier to debug and extend.
 
 ---
 
@@ -156,71 +190,61 @@ Complete
 
 - Automatic takeoff
 - Cruise altitude hold
-- Waypoint navigation
-- Autonomous mission execution
-- Mission completion detection
+- Waypoint patrol
+- Mission completion
+- Manual override
 
 ## Flight Control
 
-- PID steering
+- Rigidbody physics
 - Hover controller
-- Physics-based movement
-- Banked turns
-- Smooth acceleration
+- PD heading control
+- Smooth steering
+- Banked visual turns
 
 ## Swarm Coordination
 
-- Leader-Follower architecture
+- Leader–Follower architecture
+- Runtime follower spawning
+- Matrix formation engine
 - Dynamic formations
-- Matrix transformations
-- Runtime formation switching
+- Scalable swarm size
 
-## Path Planning
+## Trajectory Planning
 
-- Cubic Bézier paths
+- Cubic Bézier curves
 - Pure Pursuit tracking
-- Curved waypoint navigation
+- Continuous waypoint transitions
 
 ---
 
 # Implemented Formations
 
-- Line
 - V Formation
+- Line
 - Diamond
-- Circle
 - Wedge
-- Arrow
+- Arrowhead
 - Column
-- Cross
-- Plus
-- Custom Runtime Formations
+- Circle
+- Grid
+- Echelon Left
+- Echelon Right
+
+All formations are generated procedurally using leader-relative coordinates.
 
 ---
 
-# Software Architecture
+# Controls
 
-```text
-MissionManager
-│
-├── PathPlanner
-│
-├── DroneController
-│
-├── SwarmManager
-│
-└── WaypointManager
-```
-
-## Module Responsibilities
-
-| Module | Responsibility |
-|----------|----------------|
-| MissionManager | Mission FSM |
-| PathPlanner | Bézier trajectory generation |
-| DroneController | PID + Pure Pursuit control |
-| SwarmManager | Formation management |
-| WaypointManager | Mission waypoints |
+| Key | Action |
+|------|--------|
+| **W A S D** | Manual movement |
+| **Q / E** | Yaw rotation |
+| **Space** | Ascend |
+| **Left Shift** | Descend |
+| **P** | Start autonomous mission |
+| **Esc** | Cancel mission |
 
 ---
 
@@ -230,13 +254,13 @@ MissionManager
 OSPREY/
 │
 ├── Assets/
-│   │
 │   ├── Scripts/
 │   │   ├── DroneController.cs
 │   │   ├── MissionManager.cs
 │   │   ├── PathPlanner.cs
 │   │   ├── SwarmManager.cs
 │   │   ├── FormationManager.cs
+│   │   ├── FollowerDrone.cs
 │   │   └── WaypointManager.cs
 │   │
 │   ├── Prefabs/
@@ -244,114 +268,87 @@ OSPREY/
 │   └── Scenes/
 │
 ├── README.md
-│
 └── docs/
     └── OSPREY_Architecture.md
 ```
 
 ---
 
-# Controls
+# Development Journey
 
-| Key | Action |
-|------|--------|
-| W | Forward |
-| S | Backward |
-| A | Left |
-| D | Right |
-| Q | Rotate Left |
-| E | Rotate Right |
-| P | Start Mission |
-| ESC | Cancel Mission |
+Several architectural improvements were introduced while solving real simulation problems.
 
----
+| Problem | Engineering Solution |
+|----------|----------------------|
+| Followers failed above 4 drones | Matrix formation engine |
+| Formation rotation broke | Rotation matrix transformation |
+| WP1 mission freeze | Continuous Pure Pursuit tracking |
+| Waypoint orbiting | Look-ahead steering target |
+| Robotic turning | PD heading controller |
+| Runtime formation bugs | Modular formation manager |
 
-# Technologies Used
-
-- Unity 6
-- C#
-- Rigidbody Physics
-- Linear Algebra
-- PID Control
-- Bézier Curves
-- Pure Pursuit Navigation
-- Finite State Machines
-
----
-
-# Bugs Solved
-
-| Problem | Solution |
-|----------|----------|
-| Followers breaking after 5 drones | Matrix formation system |
-| Formation rotation issues | Rotation matrix transformation |
-| Waypoint orbiting | Pure Pursuit controller |
-| WP1 freeze | Continuous velocity tracking |
-| Robotic turning | PID steering |
-| Formation switching issues | Runtime formation manager |
+These changes shaped the final architecture rather than being isolated fixes.
 
 ---
 
 # Current Progress
 
-| Module | Completion |
-|----------|------------|
-| Flight Physics | 100% |
-| PID Controller | 100% |
-| Pure Pursuit | 100% |
-| Bézier Planner | 100% |
-| Formation Engine | 95% |
-| Mission System | 95% |
-| Obstacle Avoidance | 0% |
-| Mapping | 0% |
-| Swarm AI | 10% |
+| System | Status |
+|----------|--------|
+| Flight Physics | ✅ Complete |
+| PID Controller | ✅ Complete |
+| Pure Pursuit | ✅ Complete |
+| Bézier Planner | ✅ Complete |
+| Formation Engine | ✅ Complete |
+| Mission FSM | ✅ Complete |
+| Obstacle Avoidance | 🔜 Planned |
+| Occupancy Mapping | 🔜 Planned |
+| Swarm AI | 🔜 Planned |
 
-Overall Project Completion: **45%**
-
----
-
-# Future Roadmap
-
-## v1.1
-
-- RRT* Global Path Planner
-- Obstacle Avoidance
-- Dynamic Replanning
-
-## v1.2
-
-- Lidar Sensor Model
-- Occupancy Grid Mapping
-- Environment Awareness
-
-## v1.3
-
-- Drone-to-Drone Communication
-- Shared World Map
-- Formation Consensus
-
-## v2.0
-
-- Tactical Swarm AI
-- Search & Rescue Mission
-- Autonomous Area Coverage
-- Thermal Target Detection
+**Overall Progress:** **45%**
 
 ---
 
-# Why OSPREY?
+# Roadmap
 
-Most Unity drone projects simply move objects between predefined points.
+### v1.1 — Environmental Autonomy
 
-OSPREY focuses on actual robotics and autonomous systems concepts:
+- RRT* global path planner
+- Dynamic obstacle avoidance
+- Local replanning
+- Lidar sensor model
 
-- Matrix-based swarm coordination
-- PID flight control
-- Pure Pursuit navigation
-- Bézier trajectory generation
-- Modular mission architecture
+### v1.2 — Mapping
 
-The project is designed as a foundation for advanced UAV autonomy and swarm intelligence research.
+- Occupancy grid mapping
+- Persistent environment map
+- Shared world representation
+
+### v1.3 — Distributed Swarm
+
+- Drone-to-drone communication
+- Shared mission state
+- Formation consensus
+
+### v2.0 — AI Swarm Missions
+
+- Search & Rescue
+- Autonomous area coverage
+- Computer vision integration
+- Target detection
+- Tactical swarm behaviors
+
+---
+
+# Technology Stack
+
+- **Engine:** Unity 6
+- **Language:** C#
+- **Physics:** Unity Rigidbody
+- **Control:** PID / PD
+- **Navigation:** Pure Pursuit
+- **Trajectory:** Cubic Bézier Curves
+- **Mathematics:** Linear Algebra & Rotation Matrices
 
 ---
 
@@ -359,16 +356,16 @@ The project is designed as a foundation for advanced UAV autonomy and swarm inte
 
 **Himanshu Sharma**
 
-M.Tech Computer Science & Engineering
--(2026-28)
--J.C. Bose University of Science and Technology, YMCA (Formerly YMCA UST)
--Autonomous Systems | UAV Simulation | AI & Robotics
+*M.Tech Computer Science & Engineering (2026–2028)*
 
-GitHub:
-https://github.com/himaanshushrma
+**J.C. Bose University of Science and Technology, YMCA**
+
+**Focus:** Autonomous Systems • UAV Simulation • AI & Robotics
+
+GitHub: **https://github.com/himaanshushrma**
 
 ---
 
-# License
+## License
 
-This project is released under the MIT License.
+Released under the **MIT License**.
