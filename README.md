@@ -359,8 +359,9 @@ The project is designed as a foundation for advanced UAV autonomy and swarm inte
 
 **Himanshu Sharma**
 
-B.Tech Computer Science & Engineering
-
+M.Tech Computer Science & Engineering
+(2026-28)
+J.C. Bose University of Science and Technology, YMCA (Formerly YMCA UST)
 Autonomous Systems | UAV Simulation | AI & Robotics
 
 GitHub:
