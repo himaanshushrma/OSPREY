@@ -196,4 +196,14 @@ class MockSimulator:
             self.state = "Idle"
             return self._resp(True, "Mission cancelled. Swarm switched to manual hover.")
 
+        if action in ("takeoff", "land", "return_home"):
+            if action != "takeoff":
+                self.state = "Idle"
+            if action == "return_home":
+                self.pos = [0.0, 0.3, -8.0]
+            if action == "land":
+                self.pos[1] = 0.3
+            return self._resp(True, {"takeoff": "Taking off.", "land": "Landing at the current position.",
+                                     "return_home": "Returning home, then landing."}[action])
+
         return self._resp(False, f"Unknown action '{action}'.")

@@ -241,14 +241,30 @@ All formations are generated procedurally using leader-relative coordinates.
 
 | Key | Action |
 |------|--------|
-| **W A S D** | Manual movement |
-| **Q / E** | Yaw rotation |
-| **Space** | Ascend |
-| **Left Shift** | Descend |
-| **P** | Start autonomous mission |
-| **Esc** | Cancel mission |
+| **W A S D** | Forward / back / strafe |
+| **Q / E** | Yaw |
+| **Space / Left Shift** | Climb / descend (release = hover, altitude hold) |
+| **T / L** | Take off / land |
+| **G** | Return to home (climbs to 20 m, flies home, lands) |
+| **X** | Sport mode (faster manual flight) |
+| **P / Esc** | Start / cancel autonomous mission |
+| **1 - 0** | Formations |
+| **C / V** | Chase / tactical camera |
+| **O** | Object-detection overlay |
+| **F1** | Show controls in game |
 
----
+# Obstacle Avoidance & Object Detection
+
+- **CollisionAvoidance** (every drone): sphere-cast fan + 360° ring + close-contact check on the
+  `Obstacle` layer. Repulsion field keeps distance, a **Vector Field Histogram** direction search
+  picks the free direction closest to the goal (with a turn penalty against dithering), the drone
+  brakes as gaps close and **climbs over** low obstacles (trees, huts, walls). Manual flight gets
+  brake assist. Tested: a 15 m-altitude mission straight through downtown (towers to 58 m)
+  completes by threading the street canyons.
+- **ObjectDetector** (leader): simulated onboard camera (FOV, range, line of sight) + detector with
+  YOLO-style labelled boxes and confidence (person, building, tree, hut, bridge, wall). Survivors
+  (rescue targets) are logged when first seen and reported through the API to the mission agent.
+- **Ground clearance**: every mode keeps a minimum height above terrain and rooftops.
 
 # Project Structure
 
@@ -304,7 +320,7 @@ These changes shaped the final architecture rather than being isolated fixes.
 | Formation Engine | ✅ Complete |
 | Mission FSM | ✅ Complete |
 | LLM Mission Agent | ✅ Complete |
-| Obstacle Avoidance | 🔜 Planned |
+| Obstacle Avoidance | ✅ Complete |
 | Occupancy Mapping | 🔜 Planned |
 | Swarm AI | 🔜 Planned |
 

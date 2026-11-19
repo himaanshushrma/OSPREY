@@ -96,6 +96,42 @@ public static class OspreyWorldBuilder
         EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
     }
 
+    /// <summary>
+    /// The test walls were children of the 40x-scaled Ground, which blew them up into
+    /// 240 m slabs. Move them out at their intended size, 30 m east of the helipad,
+    /// and make them 8 m tall so a hovering drone actually meets them.
+    /// </summary>
+    [MenuItem("OSPREY/Fix Test Walls")]
+    public static void FixTestWalls()
+    {
+        var ground = GameObject.Find("Ground");
+        if (ground == null) { Debug.LogWarning("[OSPREY] No Ground object found."); return; }
+
+        var walls = new List<Transform>();
+        foreach (Transform child in ground.transform)
+            if (child.name.StartsWith("Wall_")) walls.Add(child);
+        if (walls.Count == 0) { Debug.Log("[OSPREY] No test walls under Ground; nothing to fix."); return; }
+
+        var course = new GameObject("TestObstacleCourse");
+        Undo.RegisterCreatedObjectUndo(course, "Fix test walls");
+        course.transform.position = new Vector3(30, 0, 0);
+
+        foreach (var w in walls)
+        {
+            Vector3 localPos = w.localPosition, localScale = w.localScale;
+            Undo.SetTransformParent(w, course.transform, "Fix test walls");
+            Undo.RecordObject(w, "Fix test walls");
+            w.localRotation = Quaternion.identity;
+            w.localScale = new Vector3(localScale.x, 8f, localScale.z);
+            w.localPosition = new Vector3(localPos.x, 4f, localPos.z);
+            w.gameObject.layer = LayerMask.NameToLayer("Obstacle") >= 0 ? LayerMask.NameToLayer("Obstacle") : w.gameObject.layer;
+        }
+
+        EditorSceneManager.MarkSceneDirty(course.scene);
+        Selection.activeGameObject = course;
+        Debug.Log($"[OSPREY] Moved {walls.Count} test walls to TestObstacleCourse at (30, 0, 0), 8 m tall. Save the scene to keep it.");
+    }
+
     // ===================================================
     // BASE (drone start area, kept clear)
     // ===================================================

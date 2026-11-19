@@ -41,6 +41,19 @@ You command one leader drone; follower drones hold a formation around it automat
 World frame (metres): +X = east/right, +Z = north/forward, Y = altitude.
 Waypoints are given as (x, z); altitude comes from the cruise altitude setting.
 
+The world (if built with OSPREY > Build World):
+- Base around (0, -8): helipad and home point. Keep missions starting and ending here.
+- City north: x -90..120, z 65..185. Towers up to ~60 m; cruise >= 65 m to overfly, or route around.
+- River east at x 142..158 with a bridge at z 105. Forest and low hills west (x < -40).
+- Fields and huts south (z < -45) and across the river (x > 165). Trees top out around 10 m.
+- Six survivors (rescue targets) are hidden in the forest and across the river.
+The drones avoid obstacles by themselves (steer, brake, climb over low ones), but plan
+sensible routes and altitudes anyway: 15-20 m clears trees and huts.
+The leader carries a camera + object detector. get_swarm_state returns "detections"
+(label, confidence, position, distance), "survivorsFound"/"survivorsTotal" and
+"survivorPositions". For a search, fly a lawnmower pattern (parallel legs ~40 m apart)
+over the area, then report what was found and where.
+
 How to work:
 1. Always call get_swarm_state first to learn where the leader is and what is running.
 2. Turn the user's request into concrete numbers. Interpret directions and distances
@@ -64,8 +77,9 @@ Finish with a short summary of what the swarm is doing (formation, altitude, rou
 TOOLS = [
     {
         "name": "get_swarm_state",
-        "description": "Get the current mission state, leader position/heading/speed, formation, "
-                       "spacing, cruise altitude, follower count and loaded waypoints.",
+        "description": "Get the current mission state, flight state (Landed/Flying/...), leader "
+                       "position/heading/speed/height above ground, formation, spacing, cruise altitude, "
+                       "waypoints, obstacle-avoidance status and camera detections incl. survivors found.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -129,6 +143,21 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "takeoff",
+        "description": "Take off from the ground to a low hover (only when landed).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "land",
+        "description": "Cancel any mission and land at the current position.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "return_home",
+        "description": "Cancel any mission, fly home at a safe height (>= 20 m) and land on the helipad.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "wait_for_mission",
         "description": "Wait up to `seconds` (max 60) while the mission runs, returning early when "
                        "it completes or the leader reaches a new waypoint segment. Returns state.",
@@ -178,6 +207,8 @@ class MissionAgent:
                 return self.sim.command("start_mission")
             if name == "cancel_mission":
                 return self.sim.command("cancel_mission")
+            if name in ("takeoff", "land", "return_home"):
+                return self.sim.command(name)
             if name == "wait_for_mission":
                 return self.wait_for_mission(float(args.get("seconds", 10)))
             return {"ok": False, "message": f"Unknown tool {name}"}

@@ -24,6 +24,7 @@ using UnityEngine;
 ///   set_waypoints   { "waypoints": [{"x":0,"z":20}, ...], "fromCurrentPosition": true }
 ///   start_mission   {}
 ///   cancel_mission  {}
+///   takeoff / land / return_home  {}
 ///
 /// Network requests arrive on a background thread; every command is executed
 /// on Unity's main thread (Update), because Unity APIs are not thread-safe.
@@ -55,6 +56,7 @@ public class SwarmCommandAPI : MonoBehaviour
 
     [Serializable] public class Vec2Dto { public float x; public float z; }
     [Serializable] public class Vec3Dto { public float x; public float y; public float z; }
+    [Serializable] public class DetectionDto { public string label; public float confidence; public float x; public float y; public float z; public float distance; }
 
     [Serializable]
     public class CommandRequest
@@ -83,6 +85,15 @@ public class SwarmCommandAPI : MonoBehaviour
         public int segmentCount;
         public Vec3Dto[] waypoints;
         public string[] availableFormations;
+        public string flightState;
+        public float altitudeAboveGround;
+        public string avoidance;
+        public string avoidanceDebug;
+        public float nearestObstacle;
+        public DetectionDto[] detections;
+        public int survivorsFound;
+        public int survivorsTotal;
+        public Vec3Dto[] survivorPositions;
     }
 
     [Serializable]
@@ -335,6 +346,9 @@ public class SwarmCommandAPI : MonoBehaviour
             case "set_waypoints":  return SetWaypoints(req.waypoints, req.fromCurrentPosition);
             case "start_mission":  return StartMission();
             case "cancel_mission": return CancelMission();
+            case "takeoff":        return FlightCommand("takeoff");
+            case "land":           return FlightCommand("land");
+            case "return_home":    return FlightCommand("return_home");
             default:
                 return Fail($"Unknown action '{req.action}'.");
         }
@@ -446,6 +460,26 @@ public class SwarmCommandAPI : MonoBehaviour
         return Ok("Mission cancelled. Swarm switched to manual hover.");
     }
 
+    Response FlightCommand(string what)
+    {
+        if (leader == null) return Fail("Leader DroneController not assigned.");
+        switch (what)
+        {
+            case "takeoff":
+                if (leader.State != DroneController.FlightState.Landed && leader.State != DroneController.FlightState.Landing)
+                    return Fail($"Already airborne ({leader.State}).");
+                leader.TakeOff();
+                return Ok("Taking off.");
+            case "land":
+                leader.Land();
+                return Ok("Landing at the current position.");
+            default:
+                if (leader.State == DroneController.FlightState.Landed) return Fail("Drone is landed.");
+                leader.ReturnHome();
+                return Ok($"Returning home at {Mathf.Max(leader.targetHeight, leader.returnHomeHeight):0} m, then landing.");
+        }
+    }
+
     // ===================================================
     // HELPERS
     // ===================================================
@@ -505,6 +539,39 @@ public class SwarmCommandAPI : MonoBehaviour
 
             var rb = leader.GetComponent<Rigidbody>();
             s.speed = rb != null ? Round(rb.linearVelocity.magnitude) : 0f;
+        }
+
+        if (leader != null)
+        {
+            s.flightState = leader.State.ToString();
+            s.altitudeAboveGround = Round(leader.transform.position.y - leader.GroundY);
+            var av = leader.Avoider;
+            s.avoidance = av != null ? av.CurrentStatus.ToString() : "Off";
+            if (av != null)
+            {
+                var rbv = leader.GetComponent<Rigidbody>().linearVelocity;
+                s.avoidanceDebug = $"ahead={(float.IsInfinity(av.AheadDistance) ? -1 : av.AheadDistance):0.0} side={av.WallFollowSide} " +
+                                   $"steer=({av.LastSteer.x:0.00},{av.LastSteer.z:0.00}) vel=({rbv.x:0.0},{rbv.z:0.0}) " +
+                                   $"wp={(leader.currentWaypoint != null ? $"({leader.currentWaypoint.position.x:0},{leader.currentWaypoint.position.z:0})" : "none")}";
+            }
+            s.nearestObstacle = av != null && !float.IsInfinity(av.NearestDistance) ? Round(av.NearestDistance) : -1f;
+
+            var det = leader.GetComponent<ObjectDetector>();
+            if (det != null)
+            {
+                var list = new List<DetectionDto>();
+                foreach (var d in det.detections)
+                {
+                    if (list.Count >= 12) break;
+                    list.Add(new DetectionDto { label = d.label, confidence = Round(d.confidence), x = Round(d.position.x), y = Round(d.position.y), z = Round(d.position.z), distance = Round(d.distance) });
+                }
+                s.detections = list.ToArray();
+                s.survivorsFound = det.SurvivorsFound.Count;
+                s.survivorsTotal = det.SurvivorsTotal;
+                var sp = new List<Vec3Dto>();
+                foreach (var p in det.SurvivorsFound) sp.Add(V(p));
+                s.survivorPositions = sp.ToArray();
+            }
         }
 
         if (waypointManager != null && waypointManager.waypoints != null)
