@@ -34,6 +34,13 @@ public class MissionManager : MonoBehaviour
 
     private Transform pathTarget;
 
+    // Read-only progress info (used by SwarmCommandAPI / the LLM agent)
+    public int CurrentSegment => currentSegment;
+    public int SegmentCount =>
+        waypointManager != null && waypointManager.waypoints != null
+            ? Mathf.Max(0, waypointManager.waypoints.Length - 1)
+            : 0;
+
     void Start()
     {
         GameObject obj = new GameObject("PathTarget");
@@ -42,7 +49,8 @@ public class MissionManager : MonoBehaviour
 
     void Update()
     {
-        if (state == MissionState.Idle &&
+        if ((state == MissionState.Idle ||
+             state == MissionState.Complete) &&
             Input.GetKeyDown(startKey))
         {
             StartMission();
@@ -77,7 +85,7 @@ public class MissionManager : MonoBehaviour
     // START
     // ===================================================
 
-    void StartMission()
+    public void StartMission()
     {
         currentSegment = 0;
         nearestIndex = 0;
@@ -97,7 +105,7 @@ public class MissionManager : MonoBehaviour
     // CANCEL
     // ===================================================
 
-    void CancelMission()
+    public void CancelMission()
     {
         leader.mode = DroneController.Mode.Manual;
         leader.currentWaypoint = null;

@@ -25,6 +25,7 @@ Unlike conventional Unity drone projects that rely on scripted movement, OSPREY 
 - Leader–Follower swarm architecture
 - Runtime formation switching
 - Mission finite state machine (FSM)
+- **LLM mission agent**: natural-language commands → swarm missions via tool calling ([agent/](agent/README.md))
 
 ---
 
@@ -65,6 +66,7 @@ Unlike conventional Unity drone projects that rely on scripted movement, OSPREY 
 | `SwarmManager` | Follower spawning & coordination |
 | `FormationManager` | Formation geometry |
 | `WaypointManager` | Mission waypoint storage |
+| `SwarmCommandAPI` | Local HTTP API used by the LLM mission agent |
 
 ---
 
@@ -301,6 +303,7 @@ These changes shaped the final architecture rather than being isolated fixes.
 | Bézier Planner | ✅ Complete |
 | Formation Engine | ✅ Complete |
 | Mission FSM | ✅ Complete |
+| LLM Mission Agent | ✅ Complete |
 | Obstacle Avoidance | 🔜 Planned |
 | Occupancy Mapping | 🔜 Planned |
 | Swarm AI | 🔜 Planned |
