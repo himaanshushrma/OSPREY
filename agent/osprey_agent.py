@@ -29,7 +29,7 @@ import os
 import sys
 import time
 
-from osprey_client import FORMATIONS, MockSimulator, SimulatorError, UnityClient
+from osprey_client import FORMATIONS, MockSimulator, SimulatorError, UnityClient, discover
 
 DEFAULT_MODEL = os.environ.get("OSPREY_MODEL", "claude-sonnet-5-5")
 MAX_AGENT_STEPS = 25
@@ -239,17 +239,20 @@ class MissionAgent:
 def main():
     ap = argparse.ArgumentParser(description="OSPREY natural-language mission agent")
     ap.add_argument("--mock", action="store_true", help="use the built-in fake simulator instead of Unity")
-    ap.add_argument("--url", default="http://localhost:8765", help="SwarmCommandAPI address")
+    ap.add_argument("--url", default=None, help="SwarmCommandAPI address (default: auto-detect ports 8765-8770)")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("-c", "--command", help="run one command and exit")
     ap.add_argument("-q", "--quiet", action="store_true", help="hide tool calls")
     args = ap.parse_args()
 
-    sim = MockSimulator() if args.mock else UnityClient(args.url)
-
-    if not args.mock:
+    if args.mock:
+        sim = MockSimulator()
+    else:
         try:
+            url = args.url or discover()
+            sim = UnityClient(url)
             sim.get_state()
+            print(f"Connected to OSPREY at {url}")
         except SimulatorError as e:
             sys.exit(str(e))
 

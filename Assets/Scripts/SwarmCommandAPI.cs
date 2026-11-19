@@ -148,27 +148,60 @@ public class SwarmCommandAPI : MonoBehaviour
                              "Assign them in the Inspector.");
     }
 
+    /// <summary>The port actually in use (may differ from `port` if that one was busy).</summary>
+    public int ActivePort { get; private set; }
+
     void OnEnable()
     {
-        try
+        // If the preferred port is busy (e.g. held by a crashed editor), try the next few.
+        string lastError = "";
+        for (int p = port; p < port + 6; p++)
         {
-            listener = new HttpListener();
-            listener.Prefixes.Add($"http://localhost:{port}/");
-            listener.Start();
-
-            running = true;
-            serverThread = new Thread(ServerLoop) { IsBackground = true, Name = "SwarmCommandAPI" };
-            serverThread.Start();
-
-            Debug.Log($"[SwarmCommandAPI] Listening on http://localhost:{port}/");
+            try
+            {
+                listener = new HttpListener();
+                listener.Prefixes.Add($"http://localhost:{p}/");
+                listener.Start();
+                ActivePort = p;
+                break;
+            }
+            catch (Exception e)
+            {
+                lastError = e.Message;
+                try { listener?.Close(); } catch { }
+                listener = null;
+            }
         }
-        catch (Exception e)
+
+        if (listener == null)
         {
-            Debug.LogError($"[SwarmCommandAPI] Could not start server on port {port}: {e.Message}");
+            Debug.LogError($"[SwarmCommandAPI] Could not start server on ports {port}-{port + 5}: {lastError}");
+            return;
         }
+
+        running = true;
+        serverThread = new Thread(ServerLoop) { IsBackground = true, Name = "SwarmCommandAPI" };
+        serverThread.Start();
+
+#if UNITY_EDITOR
+        UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += StopServer;
+#endif
+        if (ActivePort != port)
+            Debug.LogWarning($"[SwarmCommandAPI] Port {port} was busy; using {ActivePort} instead.");
+        Debug.Log($"[SwarmCommandAPI] Listening on http://localhost:{ActivePort}/");
     }
 
     void OnDisable()
+    {
+#if UNITY_EDITOR
+        UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= StopServer;
+#endif
+        StopServer();
+    }
+
+    // Also called before Unity reloads scripts during Play mode; otherwise the old
+    // listener keeps the port open and swallows requests without answering.
+    void StopServer()
     {
         running = false;
 

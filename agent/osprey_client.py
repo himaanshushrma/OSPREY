@@ -24,6 +24,22 @@ class SimulatorError(Exception):
     pass
 
 
+def discover(host: str = "localhost", first_port: int = 8765, count: int = 6, timeout: float = 1.5) -> str:
+    """Find the running SwarmCommandAPI. Unity moves to the next port if 8765 is busy."""
+    for port in range(first_port, first_port + count):
+        url = f"http://{host}:{port}"
+        try:
+            with urllib.request.urlopen(url + "/state", timeout=timeout) as resp:
+                if "state" in json.loads(resp.read().decode()):
+                    return url
+        except Exception:
+            continue
+    raise SimulatorError(
+        f"Cannot find OSPREY on ports {first_port}-{first_port + count - 1}. "
+        "Is Unity in Play mode with SwarmCommandAPI in the scene?"
+    )
+
+
 class UnityClient:
     def __init__(self, base_url: str = "http://localhost:8765", timeout: float = 8.0):
         self.base_url = base_url.rstrip("/")
