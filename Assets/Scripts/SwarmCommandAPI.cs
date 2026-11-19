@@ -125,9 +125,23 @@ public class SwarmCommandAPI : MonoBehaviour
         // Any reference left empty in the Inspector is found automatically
         if (mission == null) mission = FindFirstObjectByType<MissionManager>();
         if (formation == null) formation = FindFirstObjectByType<FormationManager>();
+
+        // Always drive the SAME objects the mission uses; a scene can contain
+        // several WaypointManagers, and writing to the wrong one is silently ignored.
+        if (mission != null)
+        {
+            if (mission.waypointManager != null) waypointManager = mission.waypointManager;
+            if (mission.leader != null) leader = mission.leader;
+            if (mission.swarm != null) swarm = mission.swarm;
+        }
+
         if (swarm == null) swarm = FindFirstObjectByType<SwarmManager>();
         if (waypointManager == null) waypointManager = FindFirstObjectByType<WaypointManager>();
-        if (leader == null && mission != null) leader = mission.leader;
+
+        var allMissions = FindObjectsByType<MissionManager>(FindObjectsSortMode.None);
+        if (allMissions.Length > 1)
+            Debug.LogWarning($"[SwarmCommandAPI] {allMissions.Length} MissionManagers in the scene; " +
+                             $"commanding the one on '{mission.name}'. Remove the extras to avoid conflicts.");
 
         if (mission == null || formation == null || waypointManager == null || leader == null)
             Debug.LogWarning("[SwarmCommandAPI] Some references are missing; related commands will fail. " +
