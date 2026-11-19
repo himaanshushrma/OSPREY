@@ -117,6 +117,23 @@ public class SwarmCommandAPI : MonoBehaviour
     // LIFECYCLE
     // ===================================================
 
+    void Awake()
+    {
+        // Keep simulating (and answering the agent) while the terminal has focus
+        Application.runInBackground = true;
+
+        // Any reference left empty in the Inspector is found automatically
+        if (mission == null) mission = FindFirstObjectByType<MissionManager>();
+        if (formation == null) formation = FindFirstObjectByType<FormationManager>();
+        if (swarm == null) swarm = FindFirstObjectByType<SwarmManager>();
+        if (waypointManager == null) waypointManager = FindFirstObjectByType<WaypointManager>();
+        if (leader == null && mission != null) leader = mission.leader;
+
+        if (mission == null || formation == null || waypointManager == null || leader == null)
+            Debug.LogWarning("[SwarmCommandAPI] Some references are missing; related commands will fail. " +
+                             "Assign them in the Inspector.");
+    }
+
     void OnEnable()
     {
         try

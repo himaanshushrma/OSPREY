@@ -35,8 +35,8 @@ the swarm anywhere unsafe.
 
 **Unity**
 1. In the `MainSimulation` scene, create an empty GameObject named `CommandAPI`.
-2. Add the `SwarmCommandAPI` component and drag in: MissionManager, FormationManager,
-   SwarmManager, WaypointManager and the leader's DroneController.
+2. Add the `SwarmCommandAPI` component. It finds MissionManager, FormationManager,
+   SwarmManager, WaypointManager and the leader by itself (or assign them in the Inspector).
 3. Press Play. The Console should show `[SwarmCommandAPI] Listening on http://localhost:8765/`.
    (Allow it if Windows Firewall asks.)
 
