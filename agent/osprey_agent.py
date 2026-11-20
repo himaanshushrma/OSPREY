@@ -29,7 +29,7 @@ import os
 import sys
 import time
 
-from osprey_client import FORMATIONS, MockSimulator, SimulatorError, UnityClient
+from osprey_client import FORMATIONS, MockSimulator, SimulatorError, UnityClient, discover
 
 DEFAULT_MODEL = os.environ.get("OSPREY_MODEL", "claude-sonnet-5-5")
 MAX_AGENT_STEPS = 25
@@ -40,6 +40,37 @@ You command one leader drone; follower drones hold a formation around it automat
 
 World frame (metres): +X = east/right, +Z = north/forward, Y = altitude.
 Waypoints are given as (x, z); altitude comes from the cruise altitude setting.
+
+The world (if built with OSPREY > Build World):
+- Base around (0, -8): helipad and home point. Keep missions starting and ending here.
+- City north: x -90..120, z 65..185. Towers up to ~60 m; cruise >= 65 m to overfly, or route around.
+- River east at x 142..158 with a bridge at z 105. Forest and low hills west (x < -40).
+- Fields and huts south (z < -45) and across the river (x > 165). Trees top out around 10 m.
+- Six survivors (rescue targets) are hidden in the forest and across the river.
+The drones avoid obstacles by themselves (steer, brake, climb over low ones), but plan
+sensible routes and altitudes anyway: 15-20 m clears trees and huts.
+The leader carries a camera + object detector. get_swarm_state returns "detections"
+(label, confidence, position, distance), "survivorsFound"/"survivorsTotal" and
+"survivorPositions". 
+v2.0 abilities:
+- set_waypoints plans every leg with RRT* around buildings automatically, so you may put
+  waypoints on the far side of the city; the reply says how many detour points were added.
+- For searches use search_area: it sizes lawnmower lanes from the swarm width and camera
+  footprint, plans the legs, tracks coverage, and returns home when done. Then use
+  wait_for_mission until searchActive is false, and report coverage, survivors found
+  (survivorPositions / survivorFinders) and where.
+- The swarm shares a sensor map (mapExploredPercent) and a radio link (commsOnline /
+  commsTotal). If drones are lost, mention it; the formation re-forms by itself.
+v3.0 abilities:
+- Battery: batteryPercent (leader), swarmBatteryMin, followerBatteries and
+  batteryNeededToGetHome. Missions and searches are checked before they start and refused
+  if the swarm cannot finish and get home with a 10% reserve; explain the refusal and offer
+  a smaller area. During flight the swarm returns home by itself when the battery reaches
+  what it needs to get home (batteryEvent). Landed drones on the pad charge.
+- search_area with split=true: every drone searches its own strip at the same time
+  (followers fly independently, altitudes staggered), so large areas finish much faster.
+  Use it for areas wider than about 120 m, or when the user asks for speed.
+- visionSource is "yolov8" when the real neural network is running, otherwise "simulated".
 
 How to work:
 1. Always call get_swarm_state first to learn where the leader is and what is running.
@@ -64,8 +95,9 @@ Finish with a short summary of what the swarm is doing (formation, altitude, rou
 TOOLS = [
     {
         "name": "get_swarm_state",
-        "description": "Get the current mission state, leader position/heading/speed, formation, "
-                       "spacing, cruise altitude, follower count and loaded waypoints.",
+        "description": "Get the current mission state, flight state (Landed/Flying/...), leader "
+                       "position/heading/speed/height above ground, formation, spacing, cruise altitude, "
+                       "waypoints, obstacle-avoidance status and camera detections incl. survivors found.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -129,6 +161,38 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "takeoff",
+        "description": "Take off from the ground to a low hover (only when landed).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "land",
+        "description": "Cancel any mission and land at the current position.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "return_home",
+        "description": "Cancel any mission, fly home at a safe height (>= 20 m) and land on the helipad.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "search_area",
+        "description": "Autonomous search of a rectangle (world metres): lawnmower lanes sized to the "
+                       "swarm, RRT*-planned legs, coverage tracking, every drone's camera detects "
+                       "survivors, then return home and land. Only when no mission is running.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "x0": {"type": "number"}, "z0": {"type": "number"},
+                "x1": {"type": "number"}, "z1": {"type": "number"},
+                "altitude": {"type": "number", "minimum": 8, "maximum": 40, "default": 25},
+                "split": {"type": "boolean", "default": False,
+                          "description": "v3.0 split search: each drone takes its own strip in parallel"},
+            },
+            "required": ["x0", "z0", "x1", "z1"],
+        },
+    },
+    {
         "name": "wait_for_mission",
         "description": "Wait up to `seconds` (max 60) while the mission runs, returning early when "
                        "it completes or the leader reaches a new waypoint segment. Returns state.",
@@ -178,6 +242,13 @@ class MissionAgent:
                 return self.sim.command("start_mission")
             if name == "cancel_mission":
                 return self.sim.command("cancel_mission")
+            if name in ("takeoff", "land", "return_home"):
+                return self.sim.command(name)
+            if name == "search_area":
+                return self.sim.command("search_area", x0=float(args["x0"]), z0=float(args["z0"]),
+                                        x1=float(args["x1"]), z1=float(args["z1"]),
+                                        altitude=float(args.get("altitude", 25)),
+                                        split=bool(args.get("split", False)))
             if name == "wait_for_mission":
                 return self.wait_for_mission(float(args.get("seconds", 10)))
             return {"ok": False, "message": f"Unknown tool {name}"}
@@ -239,17 +310,20 @@ class MissionAgent:
 def main():
     ap = argparse.ArgumentParser(description="OSPREY natural-language mission agent")
     ap.add_argument("--mock", action="store_true", help="use the built-in fake simulator instead of Unity")
-    ap.add_argument("--url", default="http://localhost:8765", help="SwarmCommandAPI address")
+    ap.add_argument("--url", default=None, help="SwarmCommandAPI address (default: auto-detect ports 8765-8770)")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("-c", "--command", help="run one command and exit")
     ap.add_argument("-q", "--quiet", action="store_true", help="hide tool calls")
     args = ap.parse_args()
 
-    sim = MockSimulator() if args.mock else UnityClient(args.url)
-
-    if not args.mock:
+    if args.mock:
+        sim = MockSimulator()
+    else:
         try:
+            url = args.url or discover()
+            sim = UnityClient(url)
             sim.get_state()
+            print(f"Connected to OSPREY at {url}")
         except SimulatorError as e:
             sys.exit(str(e))
 

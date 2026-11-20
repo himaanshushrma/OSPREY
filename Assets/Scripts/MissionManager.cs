@@ -19,20 +19,17 @@ public class MissionManager : MonoBehaviour
 
     [Header("Mission")]
     public float cruiseHeight = 5f;
-    public float waypointRadius = 2f;
-    public int lookAheadPoints = 6;
-
     public KeyCode startKey = KeyCode.P;
     public KeyCode cancelKey = KeyCode.Escape;
 
     public MissionState state = MissionState.Idle;
 
-    private List<Vector3> currentPath = new List<Vector3>();
+    List<Vector3> currentPath = new List<Vector3>();
 
-    private int currentSegment = 0;
-    private int nearestIndex = 0;
+    int currentSegment = 0;
+    int pathIndex = 0;
 
-    private Transform pathTarget;
+    Transform pathTarget;
 
     // Read-only progress info (used by SwarmCommandAPI / the LLM agent)
     public int CurrentSegment => currentSegment;
@@ -45,6 +42,9 @@ public class MissionManager : MonoBehaviour
     {
         GameObject obj = new GameObject("PathTarget");
         pathTarget = obj.transform;
+
+        // Always begin idle (the state field is serialized in the scene)
+        state = MissionState.Idle;
     }
 
     void Update()
@@ -73,22 +73,24 @@ public class MissionManager : MonoBehaviour
             return;
 
         if (Mathf.Abs(
-            leader.transform.position.y -
-            cruiseHeight) < 0.25f)
+            leader.transform.position.y - cruiseHeight) < 0.3f)
         {
             state = MissionState.Patrol;
-            GenerateCurve();
+            GenerateNewPath();
         }
     }
 
-    // ===================================================
+    //==================================================
     // START
-    // ===================================================
+    //==================================================
 
     public void StartMission()
     {
         currentSegment = 0;
-        nearestIndex = 0;
+        pathIndex = 0;
+
+        // v2.0: plan the scene's route around obstacles (RRT*) before take-off
+        MissionRoute.EnsurePlanned(waypointManager, leader.transform, cruiseHeight);
 
         leader.mode = DroneController.Mode.Auto;
         leader.targetHeight = cruiseHeight;
@@ -98,12 +100,12 @@ public class MissionManager : MonoBehaviour
 
         state = MissionState.Takeoff;
 
-        Debug.Log("Mission Started");
+        Debug.Log("MISSION STARTED");
     }
 
-    // ===================================================
+    //==================================================
     // CANCEL
-    // ===================================================
+    //==================================================
 
     public void CancelMission()
     {
@@ -114,24 +116,14 @@ public class MissionManager : MonoBehaviour
             swarm.SetAllFollowersManual();
 
         state = MissionState.Idle;
-
-        Debug.Log("Mission Cancelled");
     }
 
-    // ===================================================
-    // CREATE BEZIER CURVE
-    // ===================================================
+    //==================================================
+    // RRT + BEZIER
+    //==================================================
 
-    void GenerateCurve()
+    void GenerateNewPath()
     {
-        if (planner == null ||
-            waypointManager == null ||
-            waypointManager.waypoints.Length < 2)
-        {
-            Debug.LogError("Planner / Waypoints missing");
-            return;
-        }
-
         if (currentSegment >= waypointManager.waypoints.Length - 1)
         {
             CompleteMission();
@@ -141,83 +133,81 @@ public class MissionManager : MonoBehaviour
         Transform start =
             waypointManager.waypoints[currentSegment];
 
-        Transform end =
+        Transform goal =
             waypointManager.waypoints[currentSegment + 1];
 
-        currentPath = planner.GeneratePath(start, end);
+        currentPath = planner.GeneratePath(start, goal);
 
-        nearestIndex = 0;
+        pathIndex = 0;
 
         pathTarget.position = currentPath[0];
+
         leader.currentWaypoint = pathTarget;
 
-        Debug.Log($"Curve : WP_{currentSegment + 1} -> WP_{currentSegment + 2}");
+        Debug.Log(
+            $"Planning : WP{currentSegment + 1} → WP{currentSegment + 2}");
     }
 
-    // ===================================================
+    //==================================================
     // PURE PURSUIT FOLLOWER
-    // ===================================================
+    //==================================================
 
     void FollowPath()
     {
-        if (currentPath == null ||
-            currentPath.Count == 0)
+        if (currentPath == null)
             return;
 
-        // ---------- Find closest point ----------
+        if (currentPath.Count == 0)
+            return;
+
+        Vector3 drone = leader.transform.position;
+
         float best = Mathf.Infinity;
 
-        Vector2 droneXZ = new Vector2(
-            leader.transform.position.x,
-            leader.transform.position.z);
+        int closest = pathIndex;
 
-        for (int i = nearestIndex;
-             i < currentPath.Count;
-             i++)
+        int searchLimit =
+            Mathf.Min(pathIndex + 15, currentPath.Count - 1);
+
+        for (int i = pathIndex; i <= searchLimit; i++)
         {
-            Vector2 p = new Vector2(
-                currentPath[i].x,
-                currentPath[i].z);
-
-            float d = Vector2.Distance(droneXZ, p);
+            float d = Vector2.Distance(
+                new Vector2(drone.x, drone.z),
+                new Vector2(currentPath[i].x, currentPath[i].z));
 
             if (d < best)
             {
                 best = d;
-                nearestIndex = i;
+                closest = i;
             }
         }
 
-        // ---------- Look Ahead ----------
-        int targetIndex =
-            Mathf.Min(
-                nearestIndex + lookAheadPoints,
-                currentPath.Count - 1);
+        pathIndex = closest;
 
-        pathTarget.position = currentPath[targetIndex];
+        int lookAhead =
+            Mathf.Min(pathIndex + 5, currentPath.Count - 1);
+
+        pathTarget.position = currentPath[lookAhead];
+
         leader.currentWaypoint = pathTarget;
 
-        // ---------- Mission Transition ----------
-        Transform destination =
-            waypointManager.waypoints[currentSegment + 1];
+        Vector3 end =
+            currentPath[currentPath.Count - 1];
 
-        Vector2 goal = new Vector2(
-            destination.position.x,
-            destination.position.z);
+        float endDistance = Vector2.Distance(
+            new Vector2(drone.x, drone.z),
+            new Vector2(end.x, end.z));
 
-        if (Vector2.Distance(droneXZ, goal) <= waypointRadius)
+        if (endDistance < 1.5f)
         {
-            Debug.Log($"Reached WP_{currentSegment + 1}");
-
             currentSegment++;
-
-            GenerateCurve();
+            GenerateNewPath();
         }
     }
 
-    // ===================================================
+    //==================================================
     // COMPLETE
-    // ===================================================
+    //==================================================
 
     void CompleteMission()
     {

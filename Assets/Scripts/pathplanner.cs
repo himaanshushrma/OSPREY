@@ -1,84 +1,95 @@
 using System.Collections.Generic;
+using OSPREY.Planning;
 using UnityEngine;
 
+/// <summary>
+/// PathPlanner: turns one mission leg (waypoint A -> waypoint B) into dense route points
+/// that MissionManager's pure pursuit follows.
+///
+///   1. RRT* (RRTStarPlanner) finds a collision-free polyline at flight altitude
+///      (a clear leg comes back as a straight line instantly).
+///   2. BezierSmoother rounds every corner with a Bezier curve and samples the route
+///      every couple of metres.
+/// Modules are found or added automatically if not assigned.
+/// (v2.0: merges the original Bezier planner with the RRT* + Bezier design.)
+/// </summary>
 public class PathPlanner : MonoBehaviour
 {
+    [Header("Modules")]
+    public RRTStarPlanner rrtPlanner;
+    public BezierSmoother bezier;
+
     [Header("Bezier Curve")]
     public float controlDistance = 6f;
 
     [Range(20, 120)]
     public int samples = 60;
 
-    /// <summary>
-    /// Generates a smooth cubic Bézier path between two waypoints.
-    /// Rotation of waypoints is NOT required.
-    /// </summary>
-    public List<Vector3> GeneratePath(Transform start, Transform end)
+    [Header("Debug")]
+    public bool drawPath = true;
+
+    private List<Vector3> finalPath = new List<Vector3>();
+
+    // ====================================================
+    // PUBLIC API
+    // ====================================================
+
+    public List<Vector3> GeneratePath(Transform start, Transform goal)
     {
-        List<Vector3> path = new List<Vector3>();
+        if (start == null || goal == null)
+            return new List<Vector3>();
 
-        if (start == null || end == null)
-            return path;
+        EnsureModules();
 
-        Vector3 p0 = start.position;
-        Vector3 p3 = end.position;
+        // 1. RRT* path (straight if the leg is already clear)
+        List<Vector3> raw = rrtPlanner != null
+            ? rrtPlanner.GeneratePath(start.position, goal.position)
+            : new List<Vector3> { start.position, goal.position };
 
-        Vector3 direction = (p3 - p0).normalized;
-        float distance = Vector3.Distance(p0, p3);
+        // 2. Smooth path
+        bezier.cornerRadius = controlDistance;
+        bezier.minSamples = samples;
+        finalPath = bezier.Smooth(raw);
 
-        float curve = Mathf.Min(controlDistance, distance * 0.35f);
-
-        Vector3 p1 = p0 + direction * curve;
-        Vector3 p2 = p3 - direction * curve;
-
-        for (int i = 0; i <= samples; i++)
-        {
-            float t = i / (float)samples;
-            path.Add(CubicBezier(p0, p1, p2, p3, t));
-        }
-
-        return path;
+        return finalPath;
     }
 
-    Vector3 CubicBezier(
-        Vector3 a,
-        Vector3 b,
-        Vector3 c,
-        Vector3 d,
-        float t)
+    public List<Vector3> GetCurrentPath()
     {
-        float u = 1f - t;
-
-        return
-            u * u * u * a +
-            3 * u * u * t * b +
-            3 * u * t * t * c +
-            t * t * t * d;
+        return finalPath;
     }
+
+    void EnsureModules()
+    {
+        if (rrtPlanner == null) rrtPlanner = FindFirstObjectByType<RRTStarPlanner>();
+        if (rrtPlanner == null) rrtPlanner = gameObject.AddComponent<RRTStarPlanner>();
+        if (bezier == null) bezier = GetComponent<BezierSmoother>();
+        if (bezier == null) bezier = gameObject.AddComponent<BezierSmoother>();
+    }
+
+    // ====================================================
+    // DEBUG DRAW
+    // ====================================================
 
     void OnDrawGizmos()
     {
-        WaypointManager wp =
-            FindFirstObjectByType<WaypointManager>();
+        if (!drawPath) return;
 
-        if (wp == null) return;
-        if (wp.waypoints.Length < 2) return;
+        if (finalPath != null && finalPath.Count >= 2)
+        {
+            Gizmos.color = Color.cyan;
+            for (int i = 0; i < finalPath.Count - 1; i++)
+                Gizmos.DrawLine(finalPath[i], finalPath[i + 1]);
+            return;
+        }
+
+        // Edit mode: preview the scene's waypoint route
+        WaypointManager wp = FindFirstObjectByType<WaypointManager>();
+        if (wp == null || wp.waypoints == null || wp.waypoints.Length < 2) return;
 
         Gizmos.color = Color.cyan;
-
         for (int i = 0; i < wp.waypoints.Length - 1; i++)
-        {
-            List<Vector3> curve =
-                GeneratePath(
-                    wp.waypoints[i],
-                    wp.waypoints[i + 1]);
-
-            for (int j = 0; j < curve.Count - 1; j++)
-            {
-                Gizmos.DrawLine(
-                    curve[j],
-                    curve[j + 1]);
-            }
-        }
+            if (wp.waypoints[i] != null && wp.waypoints[i + 1] != null)
+                Gizmos.DrawLine(wp.waypoints[i].position, wp.waypoints[i + 1].position);
     }
 }

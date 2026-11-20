@@ -24,6 +24,15 @@ using UnityEngine;
 ///   set_waypoints   { "waypoints": [{"x":0,"z":20}, ...], "fromCurrentPosition": true }
 ///   start_mission   {}
 ///   cancel_mission  {}
+///   takeoff / land / return_home  {}
+///   search_area     { "x0":-190, "z0":-180, "x1":-60, "z1":40, "altitude":25 }   (v2.0)
+///   fail_drone      {}   simulate a follower failure (v2.0)
+///   split_search    same fields as search_area: every drone searches its own strip (v3.0)
+///   search_area with "split": true does the same.
+///   capture_dataset { "count": 1500 }   write a labelled YOLO dataset (v3.0)
+///   set_battery     { "percent": 35 }    testing: set every live drone's battery (v3.0)
+/// GET /map returns the occupancy grid in ROS nav_msgs/OccupancyGrid layout (v3.0).
+/// set_waypoints plans every leg with RRT* around obstacles unless "plan": false.
 ///
 /// Network requests arrive on a background thread; every command is executed
 /// on Unity's main thread (Update), because Unity APIs are not thread-safe.
@@ -55,6 +64,7 @@ public class SwarmCommandAPI : MonoBehaviour
 
     [Serializable] public class Vec2Dto { public float x; public float z; }
     [Serializable] public class Vec3Dto { public float x; public float y; public float z; }
+    [Serializable] public class DetectionDto { public string label; public float confidence; public float x; public float y; public float z; public float distance; }
 
     [Serializable]
     public class CommandRequest
@@ -64,6 +74,11 @@ public class SwarmCommandAPI : MonoBehaviour
         public float spacing = -1f;
         public float altitude = -1f;
         public bool fromCurrentPosition = true;
+        public bool plan = true;
+        public float x0, z0, x1, z1;
+        public bool split = false;
+        public int count = 0;
+        public float percent = 100f;
         public Vec2Dto[] waypoints;
     }
 
@@ -83,6 +98,48 @@ public class SwarmCommandAPI : MonoBehaviour
         public int segmentCount;
         public Vec3Dto[] waypoints;
         public string[] availableFormations;
+        public string flightState;
+        public float altitudeAboveGround;
+        public string avoidance;
+        public string avoidanceDebug;
+        public float nearestObstacle;
+        public DetectionDto[] detections;
+        public int survivorsFound;
+        public int survivorsTotal;
+        public Vec3Dto[] survivorPositions;
+        public string[] survivorFinders;
+        public int commsOnline;
+        public int commsTotal;
+        public string commsEvent;
+        public float mapExploredPercent;
+        public bool searchActive;
+        public float searchCoverage;
+        public int searchLanes;
+        public string searchReport;
+        public string lastPlan;
+        // v3.0
+        public bool searchSplit;
+        public int searchTeams;
+        public float batteryPercent;
+        public float swarmBatteryMin;
+        public float batteryNeededToGetHome;
+        public bool charging;
+        public float[] followerBatteries;
+        public string batteryEvent;
+        public Vec3Dto[] followerPositions;
+        public string[] followerModes;
+        public string visionSource;
+        public string datasetStatus;
+    }
+
+    [Serializable]
+    public class MapDto
+    {
+        public int width, height;
+        public float resolution, originX, originZ;
+        public float exploredPercent;
+        public int[] data;
+        public Vec3Dto[] plannedRoute;
     }
 
     [Serializable]
@@ -110,34 +167,96 @@ public class SwarmCommandAPI : MonoBehaviour
     volatile bool running;
     readonly ConcurrentQueue<Pending> queue = new ConcurrentQueue<Pending>();
 
-    Transform agentWaypointRoot;
-    readonly List<Transform> agentWaypoints = new List<Transform>();
 
     // ===================================================
     // LIFECYCLE
     // ===================================================
 
+    void Awake()
+    {
+        // Keep simulating (and answering the agent) while the terminal has focus
+        Application.runInBackground = true;
+
+        // Any reference left empty in the Inspector is found automatically
+        if (mission == null) mission = FindFirstObjectByType<MissionManager>();
+        if (formation == null) formation = FindFirstObjectByType<FormationManager>();
+
+        // Always drive the SAME objects the mission uses; a scene can contain
+        // several WaypointManagers, and writing to the wrong one is silently ignored.
+        if (mission != null)
+        {
+            if (mission.waypointManager != null) waypointManager = mission.waypointManager;
+            if (mission.leader != null) leader = mission.leader;
+            if (mission.swarm != null) swarm = mission.swarm;
+        }
+
+        if (swarm == null) swarm = FindFirstObjectByType<SwarmManager>();
+        if (waypointManager == null) waypointManager = FindFirstObjectByType<WaypointManager>();
+
+        var allMissions = FindObjectsByType<MissionManager>(FindObjectsSortMode.None);
+        if (allMissions.Length > 1)
+            Debug.LogWarning($"[SwarmCommandAPI] {allMissions.Length} MissionManagers in the scene; " +
+                             $"commanding the one on '{mission.name}'. Remove the extras to avoid conflicts.");
+
+        if (mission == null || formation == null || waypointManager == null || leader == null)
+            Debug.LogWarning("[SwarmCommandAPI] Some references are missing; related commands will fail. " +
+                             "Assign them in the Inspector.");
+    }
+
+    /// <summary>The port actually in use (may differ from `port` if that one was busy).</summary>
+    public int ActivePort { get; private set; }
+
     void OnEnable()
     {
-        try
+        // If the preferred port is busy (e.g. held by a crashed editor), try the next few.
+        string lastError = "";
+        for (int p = port; p < port + 6; p++)
         {
-            listener = new HttpListener();
-            listener.Prefixes.Add($"http://localhost:{port}/");
-            listener.Start();
-
-            running = true;
-            serverThread = new Thread(ServerLoop) { IsBackground = true, Name = "SwarmCommandAPI" };
-            serverThread.Start();
-
-            Debug.Log($"[SwarmCommandAPI] Listening on http://localhost:{port}/");
+            try
+            {
+                listener = new HttpListener();
+                listener.Prefixes.Add($"http://localhost:{p}/");
+                listener.Start();
+                ActivePort = p;
+                break;
+            }
+            catch (Exception e)
+            {
+                lastError = e.Message;
+                try { listener?.Close(); } catch { }
+                listener = null;
+            }
         }
-        catch (Exception e)
+
+        if (listener == null)
         {
-            Debug.LogError($"[SwarmCommandAPI] Could not start server on port {port}: {e.Message}");
+            Debug.LogError($"[SwarmCommandAPI] Could not start server on ports {port}-{port + 5}: {lastError}");
+            return;
         }
+
+        running = true;
+        serverThread = new Thread(ServerLoop) { IsBackground = true, Name = "SwarmCommandAPI" };
+        serverThread.Start();
+
+#if UNITY_EDITOR
+        UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += StopServer;
+#endif
+        if (ActivePort != port)
+            Debug.LogWarning($"[SwarmCommandAPI] Port {port} was busy; using {ActivePort} instead.");
+        Debug.Log($"[SwarmCommandAPI] Listening on http://localhost:{ActivePort}/");
     }
 
     void OnDisable()
+    {
+#if UNITY_EDITOR
+        UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= StopServer;
+#endif
+        StopServer();
+    }
+
+    // Also called before Unity reloads scripts during Play mode; otherwise the old
+    // listener keeps the port open and swallows requests without answering.
+    void StopServer()
     {
         running = false;
 
@@ -214,6 +333,13 @@ public class SwarmCommandAPI : MonoBehaviour
     {
         while (queue.TryDequeue(out Pending p))
         {
+            if (p.path == "/map" && p.method == "GET")
+            {
+                p.responseJson = MapJson();
+                p.done.Set();
+                continue;
+            }
+
             Response r;
 
             try
@@ -268,9 +394,29 @@ public class SwarmCommandAPI : MonoBehaviour
             case "set_formation":  return SetFormation(req.formation);
             case "set_spacing":    return SetSpacing(req.spacing);
             case "set_altitude":   return SetAltitude(req.altitude);
-            case "set_waypoints":  return SetWaypoints(req.waypoints, req.fromCurrentPosition);
+            case "set_waypoints":  return SetWaypoints(req.waypoints, req.fromCurrentPosition, req.plan);
             case "start_mission":  return StartMission();
             case "cancel_mission": return CancelMission();
+            case "takeoff":        return FlightCommand("takeoff");
+            case "land":           return FlightCommand("land");
+            case "return_home":    return FlightCommand("return_home");
+            case "search_area":    return SearchArea(req);
+            case "capture_dataset":
+            {
+                var dc = DatasetCapture.Instance;
+                if (dc == null) return Fail("DatasetCapture not available (DroneController.enableV3 is off).");
+                return dc.Begin(req.count, out string m) ? Ok(m) : Fail(m);
+            }
+            case "set_battery":
+            {
+                var bm = BatteryManager.Instance;
+                if (bm == null) return Fail("BatteryManager not available.");
+                int n = 0;
+                foreach (var b in bm.LiveBatteries()) { b.SetPercent(req.percent); n++; }
+                return Ok($"Battery of {n} drones set to {req.percent:0}% (testing).");
+            }
+            case "split_search":   req.split = true; return SearchArea(req);
+            case "fail_drone":     return FailDrone();
             default:
                 return Fail($"Unknown action '{req.action}'.");
         }
@@ -313,13 +459,14 @@ public class SwarmCommandAPI : MonoBehaviour
             mission.state == MissionManager.MissionState.Patrol)
         {
             if (leader != null) leader.targetHeight = altitude;
-            ApplyAgentWaypointHeight(altitude);
         }
 
         return Ok($"Cruise altitude set to {altitude:0.0} m.");
     }
 
-    Response SetWaypoints(Vec2Dto[] points, bool fromCurrentPosition)
+    string lastPlan = "";
+
+    Response SetWaypoints(Vec2Dto[] points, bool fromCurrentPosition, bool plan)
     {
         if (waypointManager == null) return Fail("WaypointManager not assigned.");
         if (IsMissionActive())
@@ -337,30 +484,18 @@ public class SwarmCommandAPI : MonoBehaviour
                 return Fail($"Waypoint coordinates must be within ±{maxCoordinate} m.");
         }
 
-        ClearAgentWaypoints();
-
-        if (agentWaypointRoot == null)
-            agentWaypointRoot = new GameObject("AgentWaypoints").transform;
-
         float y = mission != null ? mission.cruiseHeight : 5f;
-        var list = new List<Transform>();
-
-        if (fromCurrentPosition && leader != null)
-        {
-            Vector3 lp = leader.transform.position;
-            list.Add(CreateWaypoint("AgentWP_Start", new Vector3(lp.x, y, lp.z)));
-        }
-
-        for (int i = 0; i < points.Length; i++)
-            list.Add(CreateWaypoint($"AgentWP_{i + 1}", new Vector3(points[i].x, y, points[i].z)));
-
-        if (list.Count < 2)
+        var pts = new List<Vector3>();
+        if (fromCurrentPosition && leader != null) pts.Add(leader.transform.position);
+        foreach (var p in points) pts.Add(new Vector3(p.x, y, p.z));
+        if (pts.Count < 2)
             return Fail("A mission needs at least 2 points (or 1 point with fromCurrentPosition=true).");
 
-        waypointManager.waypoints = list.ToArray();
-        waypointManager.ResetMission();
-
-        return Ok($"Loaded {list.Count} waypoints ({list.Count - 1} path segments).");
+        var r = MissionRoute.Load(waypointManager, pts, y, plan);
+        lastPlan = plan
+            ? $"RRT*: {r.points} waypoints incl. {r.detourPoints} detour points, {r.length:0} m" + (r.allLegsPlanned ? "" : " (some legs direct)")
+            : $"Direct: {r.points} waypoints, {r.length:0} m";
+        return Ok($"Loaded {pts.Count} waypoints. {lastPlan}.");
     }
 
     Response StartMission()
@@ -382,6 +517,43 @@ public class SwarmCommandAPI : MonoBehaviour
         return Ok("Mission cancelled. Swarm switched to manual hover.");
     }
 
+    Response SearchArea(CommandRequest req)
+    {
+        var search = SearchMission.Instance;
+        if (search == null) return Fail("SearchMission not available (DroneController.enableV2 is off).");
+        var area = Rect.MinMaxRect(Mathf.Min(req.x0, req.x1), Mathf.Min(req.z0, req.z1), Mathf.Max(req.x0, req.x1), Mathf.Max(req.z0, req.z1));
+        bool ok = req.split ? search.StartSplitSearch(area, req.altitude, out string msg)
+                            : search.StartSearch(area, req.altitude, out msg);
+        return ok ? Ok(msg) : Fail(msg);
+    }
+
+    Response FailDrone()
+    {
+        var comms = SwarmComms.Instance;
+        if (comms == null) return Fail("SwarmComms not available.");
+        return Ok(comms.FailRandomDrone());
+    }
+
+    Response FlightCommand(string what)
+    {
+        if (leader == null) return Fail("Leader DroneController not assigned.");
+        switch (what)
+        {
+            case "takeoff":
+                if (leader.State != DroneController.FlightState.Landed && leader.State != DroneController.FlightState.Landing)
+                    return Fail($"Already airborne ({leader.State}).");
+                leader.TakeOff();
+                return Ok("Taking off.");
+            case "land":
+                leader.Land();
+                return Ok("Landing at the current position.");
+            default:
+                if (leader.State == DroneController.FlightState.Landed) return Fail("Drone is landed.");
+                leader.ReturnHome();
+                return Ok($"Returning home at {Mathf.Max(leader.targetHeight, leader.returnHomeHeight):0} m, then landing.");
+        }
+    }
+
     // ===================================================
     // HELPERS
     // ===================================================
@@ -391,29 +563,6 @@ public class SwarmCommandAPI : MonoBehaviour
         return mission != null &&
                (mission.state == MissionManager.MissionState.Takeoff ||
                 mission.state == MissionManager.MissionState.Patrol);
-    }
-
-    Transform CreateWaypoint(string name, Vector3 pos)
-    {
-        var go = new GameObject(name);
-        go.transform.SetParent(agentWaypointRoot, false);
-        go.transform.position = pos;
-        agentWaypoints.Add(go.transform);
-        return go.transform;
-    }
-
-    void ClearAgentWaypoints()
-    {
-        foreach (var t in agentWaypoints)
-            if (t != null) Destroy(t.gameObject);
-
-        agentWaypoints.Clear();
-    }
-
-    void ApplyAgentWaypointHeight(float y)
-    {
-        foreach (var t in agentWaypoints)
-            if (t != null) t.position = new Vector3(t.position.x, y, t.position.z);
     }
 
     static Vec3Dto V(Vector3 v) => new Vec3Dto { x = Round(v.x), y = Round(v.y), z = Round(v.z) };
@@ -443,6 +592,82 @@ public class SwarmCommandAPI : MonoBehaviour
             s.speed = rb != null ? Round(rb.linearVelocity.magnitude) : 0f;
         }
 
+        if (leader != null)
+        {
+            s.flightState = leader.State.ToString();
+            s.altitudeAboveGround = Round(leader.transform.position.y - leader.GroundY);
+            var av = leader.Avoider;
+            s.avoidance = av != null ? av.CurrentStatus.ToString() : "Off";
+            if (av != null)
+            {
+                var rbv = leader.GetComponent<Rigidbody>().linearVelocity;
+                s.avoidanceDebug = $"ahead={(float.IsInfinity(av.AheadDistance) ? -1 : av.AheadDistance):0.0} side={av.WallFollowSide} " +
+                                   $"steer=({av.LastSteer.x:0.00},{av.LastSteer.z:0.00}) vel=({rbv.x:0.0},{rbv.z:0.0}) " +
+                                   $"wp={(leader.currentWaypoint != null ? $"({leader.currentWaypoint.position.x:0},{leader.currentWaypoint.position.z:0})" : "none")}";
+            }
+            s.nearestObstacle = av != null && !float.IsInfinity(av.NearestDistance) ? Round(av.NearestDistance) : -1f;
+
+            var det = leader.GetComponent<ObjectDetector>();
+            if (det != null)
+            {
+                var list = new List<DetectionDto>();
+                foreach (var d in det.detections)
+                {
+                    if (list.Count >= 12) break;
+                    list.Add(new DetectionDto { label = d.label, confidence = Round(d.confidence), x = Round(d.position.x), y = Round(d.position.y), z = Round(d.position.z), distance = Round(d.distance) });
+                }
+                s.detections = list.ToArray();
+                s.survivorsFound = det.SurvivorsFound.Count;
+                s.survivorsTotal = det.SurvivorsTotal;
+                var sp = new List<Vec3Dto>();
+                foreach (var p in det.SurvivorsFound) sp.Add(V(p));
+                s.survivorPositions = sp.ToArray();
+                s.survivorFinders = det.SurvivorFinders.ToArray();
+            }
+
+            var comms = SwarmComms.Instance;
+            if (comms != null) { s.commsOnline = comms.Online; s.commsTotal = comms.Total; s.commsEvent = comms.LastEvent; }
+            var grid = OccupancyGrid.Instance;
+            if (grid != null) s.mapExploredPercent = Round(grid.ExploredPercent);
+            var search = SearchMission.Instance;
+            if (search != null)
+            {
+                s.searchActive = search.Active;
+                s.searchCoverage = Round(search.Coverage * 100f);
+                s.searchLanes = search.Lanes;
+                s.searchReport = search.LastReport;
+                s.searchSplit = search.Split;
+                s.searchTeams = search.Teams;
+            }
+
+            var bm = BatteryManager.Instance;
+            var lb = leader.GetComponent<DroneBattery>();
+            if (lb != null) { s.batteryPercent = Round(lb.Percent); s.charging = lb.Charging; }
+            if (bm != null)
+            {
+                s.swarmBatteryMin = Round(bm.SwarmPercent);
+                s.batteryNeededToGetHome = Round(bm.NeededToGetHome);
+                s.batteryEvent = bm.LastEvent;
+            }
+            if (swarm != null)
+            {
+                var bats = new List<float>(); var poss = new List<Vec3Dto>(); var modes = new List<string>();
+                foreach (var f in swarm.followers)
+                {
+                    if (f == null) continue;
+                    var fb = f.GetComponent<DroneBattery>();
+                    bats.Add(fb != null ? Round(fb.Percent) : -1);
+                    poss.Add(V(f.transform.position));
+                    modes.Add(!f.Alive ? "Failed" : f.Mode.ToString());
+                }
+                s.followerBatteries = bats.ToArray(); s.followerPositions = poss.ToArray(); s.followerModes = modes.ToArray();
+            }
+            var vc = VisionClient.Instance;
+            s.visionSource = vc != null && vc.Connected ? "yolov8" : "simulated";
+            if (DatasetCapture.Instance != null) s.datasetStatus = DatasetCapture.Instance.Status;
+            s.lastPlan = lastPlan;
+        }
+
         if (waypointManager != null && waypointManager.waypoints != null)
         {
             var wps = new List<Vec3Dto>();
@@ -452,6 +677,23 @@ public class SwarmCommandAPI : MonoBehaviour
         }
 
         return s;
+    }
+
+    string MapJson()
+    {
+        var g = OccupancyGrid.Instance;
+        if (g == null) return "{\"error\":\"OccupancyGrid not available\"}";
+        var b = g.Bounds;
+        var m = new MapDto
+        {
+            width = g.Cells, height = g.Cells, resolution = g.cellSize,
+            originX = b.xMin, originZ = b.yMin, exploredPercent = Round(g.ExploredPercent),
+            data = g.RosData()
+        };
+        var route = new List<Vec3Dto>();
+        foreach (var pt in OccupancyGrid.PlannedRoute) route.Add(V(pt));
+        m.plannedRoute = route.ToArray();
+        return JsonUtility.ToJson(m);
     }
 
     static Response Ok(string msg) => new Response { ok = true, message = msg };

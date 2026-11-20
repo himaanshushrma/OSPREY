@@ -9,3 +9,10 @@ UserSettings/
 .vscode/
 *.csproj
 *.sln
+# OSPREY v3.0
+Dataset/
+_to_delete/
+vision/runs/
+vision/models/
+__pycache__/
+*.pyc

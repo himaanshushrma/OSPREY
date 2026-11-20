@@ -24,6 +24,22 @@ class SimulatorError(Exception):
     pass
 
 
+def discover(host: str = "localhost", first_port: int = 8765, count: int = 6, timeout: float = 1.5) -> str:
+    """Find the running SwarmCommandAPI. Unity moves to the next port if 8765 is busy."""
+    for port in range(first_port, first_port + count):
+        url = f"http://{host}:{port}"
+        try:
+            with urllib.request.urlopen(url + "/state", timeout=timeout) as resp:
+                if "state" in json.loads(resp.read().decode()):
+                    return url
+        except Exception:
+            continue
+    raise SimulatorError(
+        f"Cannot find OSPREY on ports {first_port}-{first_port + count - 1}. "
+        "Is Unity in Play mode with SwarmCommandAPI in the scene?"
+    )
+
+
 class UnityClient:
     def __init__(self, base_url: str = "http://localhost:8765", timeout: float = 8.0):
         self.base_url = base_url.rstrip("/")
@@ -179,5 +195,30 @@ class MockSimulator:
         if action == "cancel_mission":
             self.state = "Idle"
             return self._resp(True, "Mission cancelled. Swarm switched to manual hover.")
+
+        if action == "search_area":
+            if active:
+                return self._resp(False, "A mission is running. Cancel it first.")
+            x0, x1 = sorted([float(p["x0"]), float(p["x1"])])
+            z0, z1 = sorted([float(p["z0"]), float(p["z1"])])
+            lanes = max(1, int((x1 - x0) // 60) + 1)
+            wps = [[self.pos[0], self.cruise, self.pos[2]]]
+            for k in range(lanes):
+                x = x0 + (x1 - x0) * (k + 0.5) / lanes
+                a, b = (z0, z1) if k % 2 == 0 else (z1, z0)
+                wps += [[x, self.cruise, a], [x, self.cruise, b]]
+            self.waypoints, self.segment, self.state = wps, 0, "Takeoff"
+            kind = "Split search" if p.get("split") else "Search"
+            return self._resp(True, f"{kind} started: {lanes} lanes over {x1-x0:.0f} x {z1-z0:.0f} m.")
+
+        if action in ("takeoff", "land", "return_home"):
+            if action != "takeoff":
+                self.state = "Idle"
+            if action == "return_home":
+                self.pos = [0.0, 0.3, -8.0]
+            if action == "land":
+                self.pos[1] = 0.3
+            return self._resp(True, {"takeoff": "Taking off.", "land": "Landing at the current position.",
+                                     "return_home": "Returning home, then landing."}[action])
 
         return self._resp(False, f"Unknown action '{action}'.")
