@@ -2,67 +2,74 @@ using UnityEngine;
 
 public class ObstacleAvoidance : MonoBehaviour
 {
-    [Header("Sensors")]
-    public float rayDistance = 4f;
-    public float avoidStrength = 10f;
-    public LayerMask obstacleMask;
+    [Header("Reference")]
+    public ObstacleSensor sensor;
 
-    Vector3 avoidance;
+    [Header("Avoidance")]
+    public float sideOffset = 2f;
+    public float forwardOffset = 3f;
 
-    public Vector3 GetAvoidanceForce()
+    private Transform avoidTarget;
+
+    void Awake()
     {
-        return avoidance;
+        GameObject g = new GameObject("AvoidTarget");
+        avoidTarget = g.transform;
     }
 
-    void FixedUpdate()
+    public Transform GetTarget(Transform missionTarget)
     {
-        avoidance = CalculateAvoidance();
-    }
+        if (sensor == null)
+            return missionTarget;
 
-    Vector3 CalculateAvoidance()
-    {
-        Vector3 force = Vector3.zero;
+        if (!sensor.Scan())
+            return missionTarget;
 
-        Vector3 origin = transform.position + Vector3.up * 0.15f;
+        Collider c = sensor.lastHit.collider;
 
-        // Centre
-        if (Physics.Raycast(origin, transform.forward, out RaycastHit hitC, rayDistance, obstacleMask))
+        BoxCollider box = c.GetComponent<BoxCollider>();
+
+        if (box == null)
+            return missionTarget;
+
+        Bounds b = box.bounds;
+
+        Vector3 left =
+            new Vector3(
+                b.min.x,
+                missionTarget.position.y,
+                b.center.z);
+
+        Vector3 right =
+            new Vector3(
+                b.max.x,
+                missionTarget.position.y,
+                b.center.z);
+
+        Vector3 chosen =
+            Vector3.Distance(transform.position, left) <
+            Vector3.Distance(transform.position, right)
+            ? left
+            : right;
+
+        Vector3 dir =
+            (missionTarget.position - chosen).normalized;
+
+        Vector3 side =
+            Vector3.Cross(Vector3.up, dir).normalized;
+
+        avoidTarget.position =
+            chosen +
+            dir * forwardOffset +
+            side * sideOffset;
+
+        if (Vector3.Distance(
+                transform.position,
+                avoidTarget.position) < 1f)
         {
-            force += hitC.normal * avoidStrength;
-            Debug.DrawRay(origin, transform.forward * hitC.distance, Color.red);
-        }
-        else
-        {
-            Debug.DrawRay(origin, transform.forward * rayDistance, Color.green);
+            return missionTarget;
         }
 
-        // Left 30°
-        Vector3 leftDir = Quaternion.Euler(0, -30, 0) * transform.forward;
-
-        if (Physics.Raycast(origin, leftDir, out RaycastHit hitL, rayDistance, obstacleMask))
-        {
-            force += hitL.normal * avoidStrength * 0.8f;
-            Debug.DrawRay(origin, leftDir * hitL.distance, Color.red);
-        }
-        else
-        {
-            Debug.DrawRay(origin, leftDir * rayDistance, Color.green);
-        }
-
-        // Right 30°
-        Vector3 rightDir = Quaternion.Euler(0, 30, 0) * transform.forward;
-
-        if (Physics.Raycast(origin, rightDir, out RaycastHit hitR, rayDistance, obstacleMask))
-        {
-            force += hitR.normal * avoidStrength * 0.8f;
-            Debug.DrawRay(origin, rightDir * hitR.distance, Color.red);
-        }
-        else
-        {
-            Debug.DrawRay(origin, rightDir * rayDistance, Color.green);
-        }
-
-        force.y = 0;
-        return force;
+        return avoidTarget;
     }
 }

@@ -16,3 +16,4 @@ vision/runs/
 vision/models/
 __pycache__/
 *.pyc
+Assets/_Recovery/
