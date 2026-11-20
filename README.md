@@ -252,6 +252,31 @@ All formations are generated procedurally using leader-relative coordinates.
   every drone's camera detects survivors, then return home and land. API `search_area`, agent tool.
   Tested: 135×225 m forest, 100% coverage in 115 s, 3 survivors found, one drone failed mid-search.
 
+# v3.0: Battery, Split Search, Real Vision & ROS 2
+
+- **Battery-aware planning** (`DroneBattery`, `BatteryManager`): every drone drains power for hover +
+  speed² + climb; landed drones charge on the pad. Missions and searches are checked before take-off
+  (route + flight home + 10% reserve) and refused with a reason if the swarm can't make it. In flight,
+  **smart return home** triggers when the swarm battery reaches what it needs to get home.
+  Tested: battery forced to 22% mid-search → search stopped at 52% coverage, swarm flew home and
+  landed with 12% (above the 10% reserve), then charged.
+- **Split search** (`split_search`, or `search_area` with `"split": true`): the area is cut into one
+  strip per drone; followers leave the formation and fly their own RRT*-planned lanes at staggered
+  altitudes, maps and survivor reports merge over the radio, then everyone rejoins and goes home.
+  Tested on the same 130×220 m forest: **100% coverage in 67 s vs 115 s** for the v2.0 formation
+  search (−42%), 3 survivors found by 3 different followers.
+- **Real YOLOv8 vision** (`DatasetCapture`, `VisionClient`, `vision/`): a synthetic-data generator
+  renders drone-camera frames with randomised survivor positions, scale and sun angle and writes
+  auto-labelled YOLO datasets (person / hut / building / tree), labels verified visually.
+  `train_yolo.py` fine-tunes YOLOv8n on an NVIDIA GPU; `vision_server.py` serves it, and the leader
+  streams its camera at 5 fps, draws the real boxes picture-in-picture (Y) and ray-casts every
+  `person` box to the ground to report survivors. Falls back to the simulated detector when offline.
+  See [vision/README.md](vision/README.md).
+- **ROS 2 bridge** (`ros2/osprey_bridge.py`): publishes pose, swarm PoseArray, `nav_msgs/OccupancyGrid`
+  (`GET /map`), RRT* `Path`, survivor markers and `BatteryState`; RViz *2D Goal Pose* sends the swarm
+  to a point; take-off / land / return-home as services. RViz config included. See
+  [ros2/README.md](ros2/README.md) (WSL2 setup; PX4 SITL mapping documented as future work).
+
 # Controls
 
 | Key | Action |
@@ -338,10 +363,13 @@ These changes shaped the final architecture rather than being isolated fixes.
 | Mission FSM | ✅ Complete |
 | LLM Mission Agent | ✅ Complete |
 | Obstacle Avoidance | ✅ Complete |
-| Occupancy Mapping | 🔜 Planned |
-| Swarm AI | 🔜 Planned |
-
-**Overall Progress:** **45%**
+| Occupancy Mapping + RRT* | ✅ v2.0 |
+| Swarm Comms + Search | ✅ v2.0 |
+| Battery-aware Planning | ✅ v3.0 |
+| Split (parallel) Search | ✅ v3.0 |
+| YOLOv8 Vision Pipeline | ✅ v3.0 (train on your GPU) |
+| ROS 2 Bridge | ✅ v3.0 |
+| PX4 SITL backend | 🔜 Planned |
 
 ---
 

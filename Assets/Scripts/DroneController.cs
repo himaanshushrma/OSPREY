@@ -58,6 +58,8 @@ public class DroneController : MonoBehaviour
     public bool startLanded = false;
     [Tooltip("v2.0: occupancy map, swarm comms, RRT* planning and search missions.")]
     public bool enableV2 = true;
+    [Tooltip("v3.0: battery model + battery-aware planning")]
+    public bool enableV3 = true;
 
     public FlightState State { get; private set; } = FlightState.Flying;
     public bool SportMode { get; private set; }
@@ -99,6 +101,13 @@ public class DroneController : MonoBehaviour
             if (FindFirstObjectByType<OSPREY.Planning.RRTStarPlanner>() == null) gameObject.AddComponent<OSPREY.Planning.RRTStarPlanner>();
             if (GetComponent<SearchMission>() == null) gameObject.AddComponent<SearchMission>();
         }
+        if (enableV3)
+        {
+            if (GetComponent<DroneBattery>() == null) gameObject.AddComponent<DroneBattery>();
+            if (GetComponent<BatteryManager>() == null) gameObject.AddComponent<BatteryManager>();
+            if (GetComponent<VisionClient>() == null) gameObject.AddComponent<VisionClient>();
+            if (FindFirstObjectByType<DatasetCapture>() == null) gameObject.AddComponent<DatasetCapture>();
+        }
 
         HomePosition = transform.position;
         homeMarker = new GameObject("HomePoint").transform;
@@ -131,6 +140,7 @@ public class DroneController : MonoBehaviour
 
     public void Land()
     {
+        SearchMission.Instance?.Abort("landing");
         StopMission();
         mode = Mode.Manual;
         currentWaypoint = null;
@@ -140,6 +150,7 @@ public class DroneController : MonoBehaviour
     public void ReturnHome()
     {
         if (State == FlightState.Landed) return;
+        SearchMission.Instance?.Abort("return home");
         StopMission();
         mode = Mode.Manual;
         currentWaypoint = null;
@@ -164,6 +175,13 @@ public class DroneController : MonoBehaviour
         if (IsFollower) return;
 
         UpdateGround();
+
+        var battery = GetComponent<DroneBattery>();
+        if (battery != null && battery.Depleted && State != FlightState.Landed && State != FlightState.Landing)
+        {
+            Debug.LogError("[Battery] Leader battery empty - emergency landing.");
+            Land();
+        }
 
         // A newly started autonomous mission overrides landing / return-home
         if (mode == Mode.Auto && State != FlightState.Flying && State != FlightState.TakingOff)
@@ -317,6 +335,19 @@ public class DroneController : MonoBehaviour
 
     static GUIStyle style;
 
+    string BatteryLine()
+    {
+        var b = GetComponent<DroneBattery>();
+        var m = BatteryManager.Instance;
+        if (b == null) return "";
+        float p = m != null ? m.SwarmPercent : b.Percent;
+        string col = p > 40 ? "#7CFC00" : p > 20 ? "#FFB347" : "#FF5555";
+        string s = $"\nBattery <color={col}><b>{b.Percent:0}%</b></color>  swarm min <color={col}>{p:0}%</color>  " +
+                   (b.Charging ? "<color=#40C8FF>charging</color>" : $"{b.Watts:0} W");
+        if (m != null && State != FlightState.Landed) s += $"  · home needs {m.NeededToGetHome:0}%";
+        return s;
+    }
+
     void OnGUI()
     {
         if (IsFollower) return;
@@ -331,20 +362,21 @@ public class DroneController : MonoBehaviour
             if (Avoider.CurrentStatus != CollisionAvoidance.Status.Clear) avoid = $"<color=#FFB347>{avoid}</color>";
         }
 
-        GUI.Box(new Rect(10, Screen.height - 86, 460, 76), GUIContent.none);
-        GUI.Label(new Rect(18, Screen.height - 82, 450, 72),
+        GUI.Box(new Rect(10, Screen.height - 104, 460, 94), GUIContent.none);
+        GUI.Label(new Rect(18, Screen.height - 100, 450, 90),
             $"<b>{State}</b>  ·  {mode}{(SportMode ? "  ·  <color=#FF6B6B>SPORT</color>" : "")}\n" +
             $"ALT {transform.position.y:0.0} m   AGL {agl:0.0} m   SPD {rb.linearVelocity.magnitude:0.0} m/s\n" +
-            $"Avoidance: {avoid}       <color=#AAAAAA>[F1] controls</color>", style);
+            $"Avoidance: {avoid}       <color=#AAAAAA>[F1] controls</color>" + BatteryLine(), style);
 
         if (!showHelp) return;
-        GUI.Box(new Rect(10, Screen.height - 316, 460, 222), GUIContent.none);
-        GUI.Label(new Rect(18, Screen.height - 312, 450, 216),
+        GUI.Box(new Rect(10, Screen.height - 352, 460, 240), GUIContent.none);
+        GUI.Label(new Rect(18, Screen.height - 348, 450, 234),
             "<b>Flight</b>   W/S forward/back · A/D strafe · Q/E yaw\n" +
             "              Space climb · Left Shift descend · release to hover\n" +
             "              T take off · L land · G return home · X sport mode\n" +
             "<b>Mission</b>  P start · Esc cancel · 1-0 formations\n" +
-            "<b>View</b>      C chase cam · V tactical cam · O detections · M map\n" +
+            "<b>View</b>      C chase cam · V tactical cam · O detections · M map · Y camera feed\n" +
+            "<b>Vision</b>   F9 capture a YOLO training dataset\n" +
             "<b>Swarm</b>    K simulate a drone failure\n\n" +
             "Avoidance steers around obstacles, brakes when close,\n" +
             "and climbs over trees, huts and walls.", style);

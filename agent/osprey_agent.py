@@ -61,6 +61,16 @@ v2.0 abilities:
   (survivorPositions / survivorFinders) and where.
 - The swarm shares a sensor map (mapExploredPercent) and a radio link (commsOnline /
   commsTotal). If drones are lost, mention it; the formation re-forms by itself.
+v3.0 abilities:
+- Battery: batteryPercent (leader), swarmBatteryMin, followerBatteries and
+  batteryNeededToGetHome. Missions and searches are checked before they start and refused
+  if the swarm cannot finish and get home with a 10% reserve; explain the refusal and offer
+  a smaller area. During flight the swarm returns home by itself when the battery reaches
+  what it needs to get home (batteryEvent). Landed drones on the pad charge.
+- search_area with split=true: every drone searches its own strip at the same time
+  (followers fly independently, altitudes staggered), so large areas finish much faster.
+  Use it for areas wider than about 120 m, or when the user asks for speed.
+- visionSource is "yolov8" when the real neural network is running, otherwise "simulated".
 
 How to work:
 1. Always call get_swarm_state first to learn where the leader is and what is running.
@@ -176,6 +186,8 @@ TOOLS = [
                 "x0": {"type": "number"}, "z0": {"type": "number"},
                 "x1": {"type": "number"}, "z1": {"type": "number"},
                 "altitude": {"type": "number", "minimum": 8, "maximum": 40, "default": 25},
+                "split": {"type": "boolean", "default": False,
+                          "description": "v3.0 split search: each drone takes its own strip in parallel"},
             },
             "required": ["x0", "z0", "x1", "z1"],
         },
@@ -235,7 +247,8 @@ class MissionAgent:
             if name == "search_area":
                 return self.sim.command("search_area", x0=float(args["x0"]), z0=float(args["z0"]),
                                         x1=float(args["x1"]), z1=float(args["z1"]),
-                                        altitude=float(args.get("altitude", 25)))
+                                        altitude=float(args.get("altitude", 25)),
+                                        split=bool(args.get("split", False)))
             if name == "wait_for_mission":
                 return self.wait_for_mission(float(args.get("seconds", 10)))
             return {"ok": False, "message": f"Unknown tool {name}"}

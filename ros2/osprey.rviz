@@ -1,0 +1,71 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 10
+      Plane Cell Count: 40
+    - Class: rviz_default_plugins/Map
+      Name: Swarm map
+      Enabled: true
+      Topic:
+        Value: /osprey/map
+        Durability Policy: Transient Local
+      Color Scheme: map
+      Alpha: 0.8
+    - Class: rviz_default_plugins/Path
+      Name: RRT* route
+      Enabled: true
+      Topic:
+        Value: /osprey/path
+        Durability Policy: Transient Local
+      Color: 64; 200; 255
+      Line Style: Billboards
+      Line Width: 0.8
+    - Class: rviz_default_plugins/PoseArray
+      Name: Swarm
+      Enabled: true
+      Topic:
+        Value: /osprey/swarm
+      Shape: Arrow (3D)
+      Color: 255; 216; 77
+    - Class: rviz_default_plugins/Pose
+      Name: Leader
+      Enabled: true
+      Topic:
+        Value: /osprey/leader/pose
+      Shape: Axes
+      Axes Length: 4
+      Axes Radius: 0.5
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Survivors
+      Enabled: true
+      Topic:
+        Value: /osprey/survivors
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+  Global Options:
+    Fixed Frame: map
+    Background Color: 24; 26; 32
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top down
+      Scale: 2
+      X: 0
+      Y: 0
+Window Geometry:
+  Width: 1400
+  Height: 900

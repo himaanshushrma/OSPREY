@@ -208,7 +208,8 @@ class MockSimulator:
                 a, b = (z0, z1) if k % 2 == 0 else (z1, z0)
                 wps += [[x, self.cruise, a], [x, self.cruise, b]]
             self.waypoints, self.segment, self.state = wps, 0, "Takeoff"
-            return self._resp(True, f"Search started: {lanes} lanes over {x1-x0:.0f} x {z1-z0:.0f} m.")
+            kind = "Split search" if p.get("split") else "Search"
+            return self._resp(True, f"{kind} started: {lanes} lanes over {x1-x0:.0f} x {z1-z0:.0f} m.")
 
         if action in ("takeoff", "land", "return_home"):
             if action != "takeoff":

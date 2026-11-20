@@ -111,6 +111,23 @@ public class OccupancyGrid : MonoBehaviour
         return ix >= 0 && iz >= 0 && ix < n && iz < n;
     }
 
+    /// <summary>
+    /// v3.0: the map as ROS nav_msgs/OccupancyGrid data (row-major from the min corner):
+    /// -1 unknown, 0 free, 100 occupied (obstacle top above `obstacleHeight`).
+    /// </summary>
+    public int[] RosData(float obstacleHeight = 2f)
+    {
+        var d = new int[n * n];
+        for (int iz = 0; iz < n; iz++)
+            for (int ix = 0; ix < n; ix++)
+            {
+                int i = iz * n + ix;
+                bool occupied = KnownTop(ix, iz) > obstacleHeight;
+                d[i] = occupied ? 100 : (seen[i] ? 0 : -1);
+            }
+        return d;
+    }
+
     public Rect Bounds => new Rect(center.x - size * 0.5f, center.y - size * 0.5f, size, size);
 
     /// <summary>Highest obstacle top known in a cell (sensed, plus prior if enabled).</summary>

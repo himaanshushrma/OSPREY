@@ -10,6 +10,10 @@ using UnityEngine;
 /// no overlay) so the whole swarm searches, and it can fail (Fail(): motors off, it drops).
 /// With CollisionAvoidance (added automatically) it is pushed away from obstacles, climbs
 /// over low ones, and never sinks into the ground.
+///
+/// v3.0: Independent mode (split search). FlyRoute() sends the drone along its own
+/// RRT*-planned route with full direction-search avoidance; Rejoin() brings it back into
+/// the formation. It also carries a DroneBattery.
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class FollowerDrone : MonoBehaviour
@@ -35,6 +39,20 @@ public class FollowerDrone : MonoBehaviour
     [Header("Comms (v2.0)")]
     [Tooltip("Hold position if no leader state has arrived for this long.")]
     public float linkFailsafe = 1.5f;
+
+    public enum FlightMode { Formation, Independent }
+
+    [Header("Independent flight (v3.0)")]
+    public float routeSpeed = 7f;
+    public float waypointRadius = 4f;
+
+    public FlightMode Mode { get; private set; } = FlightMode.Formation;
+    public bool RouteDone { get; private set; }
+    public int RouteProgress => routeIndex;
+    public int RouteLength => route != null ? route.Count : 0;
+
+    System.Collections.Generic.List<Vector3> route;
+    int routeIndex;
 
     public bool Alive { get; private set; } = true;
     public bool LinkOnline { get; set; } = true;
@@ -72,6 +90,71 @@ public class FollowerDrone : MonoBehaviour
 
         if (GetComponent<ObjectDetector>() == null)
             gameObject.AddComponent<ObjectDetector>();
+        if (GetComponent<DroneBattery>() == null)
+            gameObject.AddComponent<DroneBattery>();
+    }
+
+    /// <summary>Leave the formation and fly this route on our own (split search).</summary>
+    public void FlyRoute(System.Collections.Generic.List<Vector3> points)
+    {
+        if (!Alive || points == null || points.Count == 0) return;
+        route = new System.Collections.Generic.List<Vector3>(points);
+        routeIndex = 0;
+        RouteDone = false;
+        Mode = FlightMode.Independent;
+        if (avoid != null) { avoid.searchRays = 16; avoid.range = 14f; }
+    }
+
+    /// <summary>Return to our formation slot.</summary>
+    public void Rejoin()
+    {
+        Mode = FlightMode.Formation;
+        RouteDone = false;
+        route = null;
+        if (avoid != null) { avoid.searchRays = 0; avoid.range = 10f; }
+    }
+
+    void FlyIndependent()
+    {
+        Vector3 pos = transform.position;
+        Vector3 horizontal = Vector3.zero;
+        float targetY = pos.y;
+
+        if (!RouteDone && route != null)
+        {
+            Vector3 target = route[routeIndex];
+            Vector3 to = target - pos; to.y = 0;
+            if (to.magnitude < waypointRadius)
+            {
+                routeIndex++;
+                if (routeIndex >= route.Count) { RouteDone = true; routeIndex = route.Count - 1; }
+            }
+            targetY = route[Mathf.Min(routeIndex, route.Count - 1)].y;
+
+            if (!RouteDone)
+            {
+                Vector3 dir = to.sqrMagnitude > 1e-4f ? to.normalized : transform.forward;
+                float speed = routeSpeed;
+                if (avoid != null)
+                {
+                    avoid.SetProbeDirection(dir);
+                    dir = avoid.Steer(dir);
+                    speed *= avoid.SpeedFactor;
+                }
+                horizontal = dir * speed;
+                if (dir.sqrMagnitude > 1e-4f)
+                    rb.MoveRotation(Quaternion.Slerp(rb.rotation, Quaternion.LookRotation(dir), 4f * Time.fixedDeltaTime));
+            }
+        }
+
+        if (avoid != null)
+        {
+            if (avoid.ClimbTargetY > targetY) targetY = avoid.ClimbTargetY;
+            if (!float.IsInfinity(avoid.GroundDistance)) targetY = Mathf.Max(targetY, pos.y - avoid.GroundDistance + 2f);
+        }
+        float vy = Mathf.Clamp((targetY - pos.y) * 2f, -6f, 6f);
+        Vector3 v = new Vector3(horizontal.x, vy, horizontal.z);
+        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, v, 8f * Time.fixedDeltaTime);
     }
 
     /// <summary>Called by SwarmComms when a leader broadcast gets through.</summary>
@@ -98,6 +181,11 @@ public class FollowerDrone : MonoBehaviour
     {
         if (!Alive || leader == null || formation == null)
             return;
+
+        if (Mode == FlightMode.Independent) { FlyIndependent(); return; }
+
+        var battery = GetComponent<DroneBattery>();
+        if (battery != null && battery.Depleted) { Fail(); return; }
 
         // Leader state: from the radio if comms exist, else the true transform
         Vector3 leaderPos;

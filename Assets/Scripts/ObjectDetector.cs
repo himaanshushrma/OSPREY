@@ -35,6 +35,8 @@ public class ObjectDetector : MonoBehaviour
 
     [Header("Overlay")]
     public bool showOverlay = true;
+    [Tooltip("v3.0: VisionClient turns this off on the leader while the real YOLOv8 model is connected")]
+    public bool survivorsFromSimulation = true;
     public KeyCode toggleKey = KeyCode.O;
     public int maxBoxes = 30;
 
@@ -72,7 +74,7 @@ public class ObjectDetector : MonoBehaviour
     float nextScan;
     System.Random noise = new System.Random(7);
 
-    static string Classify(string name)
+    public static string Classify(string name)
     {
         if (name.StartsWith("RescueTarget_")) return "person";   // not the "RescueTargets" folder
         if (name.StartsWith("Building_") || name == "Hangar" || name == "ControlTower") return "building";
@@ -157,7 +159,7 @@ public class ObjectDetector : MonoBehaviour
 
             if (c.label == "person" && !c.found && conf >= survivorConfidence)
             {
-                if (IsPrimary) { c.found = true; RegisterSurvivor(c.go, b.center, conf, "leader"); }
+                if (IsPrimary) { if (survivorsFromSimulation) { c.found = true; RegisterSurvivor(c.go, b.center, conf, "leader"); } }
                 else if (Primary != null && SwarmComms.Instance != null && SwarmComms.Instance.SendToLeader(gameObject))
                 {
                     c.found = true;   // delivered; otherwise try again on the next scan
@@ -170,13 +172,14 @@ public class ObjectDetector : MonoBehaviour
     }
 
     /// <summary>Merge a survivor sighting into the swarm's list (leader only).</summary>
-    public void RegisterSurvivor(GameObject obj, Vector3 pos, float conf, string finder)
+    public bool RegisterSurvivor(GameObject obj, Vector3 pos, float conf, string finder)
     {
-        if (!survivorObjects.Add(obj)) return;
+        if (!survivorObjects.Add(obj)) return false;
         SurvivorsFound.Add(pos);
         SurvivorFinders.Add(finder);
         Debug.Log($"[ObjectDetector] SURVIVOR FOUND by {finder}: {obj.name} at ({pos.x:0}, {pos.z:0}), " +
                   $"confidence {conf:0.00}. {SurvivorsFound.Count}/{SurvivorsTotal} found.");
+        return true;
     }
 
     // ===================================================

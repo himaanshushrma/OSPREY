@@ -27,6 +27,11 @@ using UnityEngine;
 ///   takeoff / land / return_home  {}
 ///   search_area     { "x0":-190, "z0":-180, "x1":-60, "z1":40, "altitude":25 }   (v2.0)
 ///   fail_drone      {}   simulate a follower failure (v2.0)
+///   split_search    same fields as search_area: every drone searches its own strip (v3.0)
+///   search_area with "split": true does the same.
+///   capture_dataset { "count": 1500 }   write a labelled YOLO dataset (v3.0)
+///   set_battery     { "percent": 35 }    testing: set every live drone's battery (v3.0)
+/// GET /map returns the occupancy grid in ROS nav_msgs/OccupancyGrid layout (v3.0).
 /// set_waypoints plans every leg with RRT* around obstacles unless "plan": false.
 ///
 /// Network requests arrive on a background thread; every command is executed
@@ -71,6 +76,9 @@ public class SwarmCommandAPI : MonoBehaviour
         public bool fromCurrentPosition = true;
         public bool plan = true;
         public float x0, z0, x1, z1;
+        public bool split = false;
+        public int count = 0;
+        public float percent = 100f;
         public Vec2Dto[] waypoints;
     }
 
@@ -109,6 +117,29 @@ public class SwarmCommandAPI : MonoBehaviour
         public int searchLanes;
         public string searchReport;
         public string lastPlan;
+        // v3.0
+        public bool searchSplit;
+        public int searchTeams;
+        public float batteryPercent;
+        public float swarmBatteryMin;
+        public float batteryNeededToGetHome;
+        public bool charging;
+        public float[] followerBatteries;
+        public string batteryEvent;
+        public Vec3Dto[] followerPositions;
+        public string[] followerModes;
+        public string visionSource;
+        public string datasetStatus;
+    }
+
+    [Serializable]
+    public class MapDto
+    {
+        public int width, height;
+        public float resolution, originX, originZ;
+        public float exploredPercent;
+        public int[] data;
+        public Vec3Dto[] plannedRoute;
     }
 
     [Serializable]
@@ -302,6 +333,13 @@ public class SwarmCommandAPI : MonoBehaviour
     {
         while (queue.TryDequeue(out Pending p))
         {
+            if (p.path == "/map" && p.method == "GET")
+            {
+                p.responseJson = MapJson();
+                p.done.Set();
+                continue;
+            }
+
             Response r;
 
             try
@@ -363,6 +401,21 @@ public class SwarmCommandAPI : MonoBehaviour
             case "land":           return FlightCommand("land");
             case "return_home":    return FlightCommand("return_home");
             case "search_area":    return SearchArea(req);
+            case "capture_dataset":
+            {
+                var dc = DatasetCapture.Instance;
+                if (dc == null) return Fail("DatasetCapture not available (DroneController.enableV3 is off).");
+                return dc.Begin(req.count, out string m) ? Ok(m) : Fail(m);
+            }
+            case "set_battery":
+            {
+                var bm = BatteryManager.Instance;
+                if (bm == null) return Fail("BatteryManager not available.");
+                int n = 0;
+                foreach (var b in bm.LiveBatteries()) { b.SetPercent(req.percent); n++; }
+                return Ok($"Battery of {n} drones set to {req.percent:0}% (testing).");
+            }
+            case "split_search":   req.split = true; return SearchArea(req);
             case "fail_drone":     return FailDrone();
             default:
                 return Fail($"Unknown action '{req.action}'.");
@@ -469,7 +522,8 @@ public class SwarmCommandAPI : MonoBehaviour
         var search = SearchMission.Instance;
         if (search == null) return Fail("SearchMission not available (DroneController.enableV2 is off).");
         var area = Rect.MinMaxRect(Mathf.Min(req.x0, req.x1), Mathf.Min(req.z0, req.z1), Mathf.Max(req.x0, req.x1), Mathf.Max(req.z0, req.z1));
-        bool ok = search.StartSearch(area, req.altitude, out string msg);
+        bool ok = req.split ? search.StartSplitSearch(area, req.altitude, out string msg)
+                            : search.StartSearch(area, req.altitude, out msg);
         return ok ? Ok(msg) : Fail(msg);
     }
 
@@ -582,7 +636,35 @@ public class SwarmCommandAPI : MonoBehaviour
                 s.searchCoverage = Round(search.Coverage * 100f);
                 s.searchLanes = search.Lanes;
                 s.searchReport = search.LastReport;
+                s.searchSplit = search.Split;
+                s.searchTeams = search.Teams;
             }
+
+            var bm = BatteryManager.Instance;
+            var lb = leader.GetComponent<DroneBattery>();
+            if (lb != null) { s.batteryPercent = Round(lb.Percent); s.charging = lb.Charging; }
+            if (bm != null)
+            {
+                s.swarmBatteryMin = Round(bm.SwarmPercent);
+                s.batteryNeededToGetHome = Round(bm.NeededToGetHome);
+                s.batteryEvent = bm.LastEvent;
+            }
+            if (swarm != null)
+            {
+                var bats = new List<float>(); var poss = new List<Vec3Dto>(); var modes = new List<string>();
+                foreach (var f in swarm.followers)
+                {
+                    if (f == null) continue;
+                    var fb = f.GetComponent<DroneBattery>();
+                    bats.Add(fb != null ? Round(fb.Percent) : -1);
+                    poss.Add(V(f.transform.position));
+                    modes.Add(!f.Alive ? "Failed" : f.Mode.ToString());
+                }
+                s.followerBatteries = bats.ToArray(); s.followerPositions = poss.ToArray(); s.followerModes = modes.ToArray();
+            }
+            var vc = VisionClient.Instance;
+            s.visionSource = vc != null && vc.Connected ? "yolov8" : "simulated";
+            if (DatasetCapture.Instance != null) s.datasetStatus = DatasetCapture.Instance.Status;
             s.lastPlan = lastPlan;
         }
 
@@ -595,6 +677,23 @@ public class SwarmCommandAPI : MonoBehaviour
         }
 
         return s;
+    }
+
+    string MapJson()
+    {
+        var g = OccupancyGrid.Instance;
+        if (g == null) return "{\"error\":\"OccupancyGrid not available\"}";
+        var b = g.Bounds;
+        var m = new MapDto
+        {
+            width = g.Cells, height = g.Cells, resolution = g.cellSize,
+            originX = b.xMin, originZ = b.yMin, exploredPercent = Round(g.ExploredPercent),
+            data = g.RosData()
+        };
+        var route = new List<Vec3Dto>();
+        foreach (var pt in OccupancyGrid.PlannedRoute) route.Add(V(pt));
+        m.plannedRoute = route.ToArray();
+        return JsonUtility.ToJson(m);
     }
 
     static Response Ok(string msg) => new Response { ok = true, message = msg };
