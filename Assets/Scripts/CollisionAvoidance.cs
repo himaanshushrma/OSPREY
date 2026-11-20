@@ -41,6 +41,11 @@ public class CollisionAvoidance : MonoBehaviour
     public float maxClimb = 10f;
     public float climbMargin = 3f;
 
+    [Header("Mapping (v2.0)")]
+    [Tooltip("Report what the sensors see to the shared OccupancyGrid, over SwarmComms.")]
+    public bool reportToMap = true;
+    public int mapEverySteps = 5;
+
     [Header("Debug")]
     public bool drawRays = true;
 
@@ -66,6 +71,10 @@ public class CollisionAvoidance : MonoBehaviour
     Vector3 lastChoice;
     int chosenIndex = -1;
     float chosenFree = Mathf.Infinity, chosenDeviation;
+    int mapTick;
+    bool recording;
+    readonly System.Collections.Generic.List<Vector4> mapHits = new System.Collections.Generic.List<Vector4>();
+    readonly System.Collections.Generic.List<Vector3> mapFree = new System.Collections.Generic.List<Vector3>();
 
     void Awake()
     {
@@ -93,6 +102,8 @@ public class CollisionAvoidance : MonoBehaviour
     void Sense()
     {
         Vector3 origin = transform.position;
+        recording = reportToMap && OccupancyGrid.Instance != null && (++mapTick % Mathf.Max(1, mapEverySteps) == 0);
+        if (recording) { mapHits.Clear(); mapFree.Clear(); }
         Vector3 rep = Vector3.zero;
         float nearest = Mathf.Infinity;
         Collider nearestCol = null;
@@ -144,8 +155,13 @@ public class CollisionAvoidance : MonoBehaviour
             }
             for (int k = 0; k < searchRays; k++)
             {
-                freeDist[k] = Physics.SphereCast(origin, probeRadius, searchDirs[k], out RaycastHit h, range, obstacleMask, QueryTriggerInteraction.Ignore)
-                    ? h.distance : range;
+                bool hitK = Physics.SphereCast(origin, probeRadius, searchDirs[k], out RaycastHit h, range, obstacleMask, QueryTriggerInteraction.Ignore);
+                freeDist[k] = hitK ? h.distance : range;
+                if (recording)
+                {
+                    if (hitK) mapHits.Add(new Vector4(h.point.x, h.point.y, h.point.z, h.collider.bounds.max.y));
+                    else mapFree.Add(origin + searchDirs[k] * range);
+                }
             }
         }
 
@@ -157,8 +173,21 @@ public class CollisionAvoidance : MonoBehaviour
         aheadN.y = 0;
         aheadNormal = aheadN.sqrMagnitude > 1e-4f ? aheadN.normalized : -probeDir;
 
-        GroundDistance = Physics.Raycast(origin, Vector3.down, out RaycastHit g, 300f,
-            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) ? g.distance : Mathf.Infinity;
+        bool groundHit = Physics.Raycast(origin, Vector3.down, out RaycastHit g, 300f,
+            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        GroundDistance = groundHit ? g.distance : Mathf.Infinity;
+
+        if (recording)
+        {
+            var comms = SwarmComms.Instance;
+            if (comms == null || comms.SendToLeader(gameObject))
+            {
+                var grid = OccupancyGrid.Instance;
+                foreach (var e in mapFree) grid.ReportFree(origin, e);
+                foreach (var h in mapHits) { grid.ReportFree(origin, h); grid.ReportHit(h, h.w); }
+                if (groundHit) grid.ReportGround(g.point);
+            }
+        }
 
         // Hop over low obstacles directly ahead
         if (aheadCollider != null && ahead < safeDistance * 2.5f)
@@ -193,10 +222,12 @@ public class CollisionAvoidance : MonoBehaviour
             if (hit.distance < nearest) { nearest = hit.distance; nearestCol = hit.collider; }
             hitCol = hit.collider;
             normal = hit.normal;
+            if (recording) mapHits.Add(new Vector4(hit.point.x, hit.point.y, hit.point.z, hit.collider.bounds.max.y));
             if (drawRays) Debug.DrawRay(origin, dir * hit.distance, Color.red);
             return hit.distance;
         }
         if (drawRays) Debug.DrawRay(origin, dir * length, new Color(0f, 1f, 0f, 0.25f));
+        if (recording) mapFree.Add(origin + dir * length);
         return length;
     }
 

@@ -196,6 +196,20 @@ class MockSimulator:
             self.state = "Idle"
             return self._resp(True, "Mission cancelled. Swarm switched to manual hover.")
 
+        if action == "search_area":
+            if active:
+                return self._resp(False, "A mission is running. Cancel it first.")
+            x0, x1 = sorted([float(p["x0"]), float(p["x1"])])
+            z0, z1 = sorted([float(p["z0"]), float(p["z1"])])
+            lanes = max(1, int((x1 - x0) // 60) + 1)
+            wps = [[self.pos[0], self.cruise, self.pos[2]]]
+            for k in range(lanes):
+                x = x0 + (x1 - x0) * (k + 0.5) / lanes
+                a, b = (z0, z1) if k % 2 == 0 else (z1, z0)
+                wps += [[x, self.cruise, a], [x, self.cruise, b]]
+            self.waypoints, self.segment, self.state = wps, 0, "Takeoff"
+            return self._resp(True, f"Search started: {lanes} lanes over {x1-x0:.0f} x {z1-z0:.0f} m.")
+
         if action in ("takeoff", "land", "return_home"):
             if action != "takeoff":
                 self.state = "Idle"

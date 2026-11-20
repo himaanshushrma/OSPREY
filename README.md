@@ -237,6 +237,21 @@ All formations are generated procedurally using leader-relative coordinates.
 
 ---
 
+# v2.0: Mapping, Planning, Comms & Search
+
+- **OccupancyGrid**: 100×100 cells (4 m) shared map. Prior scan at start + live mapping from every
+  drone's sensors, delivered over the radio. Minimap overlay (M) shows explored area, obstacles,
+  the planned route, search coverage, drones and survivors.
+- **RRT\* planner** (`Planning/RRTStarPlanner.cs`): choose-parent + rewire, segment checks on the map
+  with formation-width inflation, path shortcutting; `PathPlanner` + `BezierSmoother` round the corners.
+  Every mission (API, P key, search) is planned around obstacles before take-off.
+  Tested: base → north of the city at 15 m planned around the city in 0.9 s.
+- **SwarmComms**: simulated radio (range, packet loss, 10 Hz). Followers fly on received leader
+  state with dead reckoning; heartbeats detect lost drones and the formation re-forms (K = fail a drone).
+- **SearchMission**: lawnmower lanes sized from swarm width + camera footprint, coverage tracking,
+  every drone's camera detects survivors, then return home and land. API `search_area`, agent tool.
+  Tested: 135×225 m forest, 100% coverage in 115 s, 3 survivors found, one drone failed mid-search.
+
 # Controls
 
 | Key | Action |
@@ -251,6 +266,8 @@ All formations are generated procedurally using leader-relative coordinates.
 | **1 - 0** | Formations |
 | **C / V** | Chase / tactical camera |
 | **O** | Object-detection overlay |
+| **M** | Swarm map (minimap) |
+| **K** | Simulate a drone failure |
 | **F1** | Show controls in game |
 
 # Obstacle Avoidance & Object Detection

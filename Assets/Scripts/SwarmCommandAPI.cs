@@ -25,6 +25,9 @@ using UnityEngine;
 ///   start_mission   {}
 ///   cancel_mission  {}
 ///   takeoff / land / return_home  {}
+///   search_area     { "x0":-190, "z0":-180, "x1":-60, "z1":40, "altitude":25 }   (v2.0)
+///   fail_drone      {}   simulate a follower failure (v2.0)
+/// set_waypoints plans every leg with RRT* around obstacles unless "plan": false.
 ///
 /// Network requests arrive on a background thread; every command is executed
 /// on Unity's main thread (Update), because Unity APIs are not thread-safe.
@@ -66,6 +69,8 @@ public class SwarmCommandAPI : MonoBehaviour
         public float spacing = -1f;
         public float altitude = -1f;
         public bool fromCurrentPosition = true;
+        public bool plan = true;
+        public float x0, z0, x1, z1;
         public Vec2Dto[] waypoints;
     }
 
@@ -94,6 +99,16 @@ public class SwarmCommandAPI : MonoBehaviour
         public int survivorsFound;
         public int survivorsTotal;
         public Vec3Dto[] survivorPositions;
+        public string[] survivorFinders;
+        public int commsOnline;
+        public int commsTotal;
+        public string commsEvent;
+        public float mapExploredPercent;
+        public bool searchActive;
+        public float searchCoverage;
+        public int searchLanes;
+        public string searchReport;
+        public string lastPlan;
     }
 
     [Serializable]
@@ -121,8 +136,6 @@ public class SwarmCommandAPI : MonoBehaviour
     volatile bool running;
     readonly ConcurrentQueue<Pending> queue = new ConcurrentQueue<Pending>();
 
-    Transform agentWaypointRoot;
-    readonly List<Transform> agentWaypoints = new List<Transform>();
 
     // ===================================================
     // LIFECYCLE
@@ -343,12 +356,14 @@ public class SwarmCommandAPI : MonoBehaviour
             case "set_formation":  return SetFormation(req.formation);
             case "set_spacing":    return SetSpacing(req.spacing);
             case "set_altitude":   return SetAltitude(req.altitude);
-            case "set_waypoints":  return SetWaypoints(req.waypoints, req.fromCurrentPosition);
+            case "set_waypoints":  return SetWaypoints(req.waypoints, req.fromCurrentPosition, req.plan);
             case "start_mission":  return StartMission();
             case "cancel_mission": return CancelMission();
             case "takeoff":        return FlightCommand("takeoff");
             case "land":           return FlightCommand("land");
             case "return_home":    return FlightCommand("return_home");
+            case "search_area":    return SearchArea(req);
+            case "fail_drone":     return FailDrone();
             default:
                 return Fail($"Unknown action '{req.action}'.");
         }
@@ -391,13 +406,14 @@ public class SwarmCommandAPI : MonoBehaviour
             mission.state == MissionManager.MissionState.Patrol)
         {
             if (leader != null) leader.targetHeight = altitude;
-            ApplyAgentWaypointHeight(altitude);
         }
 
         return Ok($"Cruise altitude set to {altitude:0.0} m.");
     }
 
-    Response SetWaypoints(Vec2Dto[] points, bool fromCurrentPosition)
+    string lastPlan = "";
+
+    Response SetWaypoints(Vec2Dto[] points, bool fromCurrentPosition, bool plan)
     {
         if (waypointManager == null) return Fail("WaypointManager not assigned.");
         if (IsMissionActive())
@@ -415,30 +431,18 @@ public class SwarmCommandAPI : MonoBehaviour
                 return Fail($"Waypoint coordinates must be within ±{maxCoordinate} m.");
         }
 
-        ClearAgentWaypoints();
-
-        if (agentWaypointRoot == null)
-            agentWaypointRoot = new GameObject("AgentWaypoints").transform;
-
         float y = mission != null ? mission.cruiseHeight : 5f;
-        var list = new List<Transform>();
-
-        if (fromCurrentPosition && leader != null)
-        {
-            Vector3 lp = leader.transform.position;
-            list.Add(CreateWaypoint("AgentWP_Start", new Vector3(lp.x, y, lp.z)));
-        }
-
-        for (int i = 0; i < points.Length; i++)
-            list.Add(CreateWaypoint($"AgentWP_{i + 1}", new Vector3(points[i].x, y, points[i].z)));
-
-        if (list.Count < 2)
+        var pts = new List<Vector3>();
+        if (fromCurrentPosition && leader != null) pts.Add(leader.transform.position);
+        foreach (var p in points) pts.Add(new Vector3(p.x, y, p.z));
+        if (pts.Count < 2)
             return Fail("A mission needs at least 2 points (or 1 point with fromCurrentPosition=true).");
 
-        waypointManager.waypoints = list.ToArray();
-        waypointManager.ResetMission();
-
-        return Ok($"Loaded {list.Count} waypoints ({list.Count - 1} path segments).");
+        var r = MissionRoute.Load(waypointManager, pts, y, plan);
+        lastPlan = plan
+            ? $"RRT*: {r.points} waypoints incl. {r.detourPoints} detour points, {r.length:0} m" + (r.allLegsPlanned ? "" : " (some legs direct)")
+            : $"Direct: {r.points} waypoints, {r.length:0} m";
+        return Ok($"Loaded {pts.Count} waypoints. {lastPlan}.");
     }
 
     Response StartMission()
@@ -458,6 +462,22 @@ public class SwarmCommandAPI : MonoBehaviour
 
         mission.CancelMission();
         return Ok("Mission cancelled. Swarm switched to manual hover.");
+    }
+
+    Response SearchArea(CommandRequest req)
+    {
+        var search = SearchMission.Instance;
+        if (search == null) return Fail("SearchMission not available (DroneController.enableV2 is off).");
+        var area = Rect.MinMaxRect(Mathf.Min(req.x0, req.x1), Mathf.Min(req.z0, req.z1), Mathf.Max(req.x0, req.x1), Mathf.Max(req.z0, req.z1));
+        bool ok = search.StartSearch(area, req.altitude, out string msg);
+        return ok ? Ok(msg) : Fail(msg);
+    }
+
+    Response FailDrone()
+    {
+        var comms = SwarmComms.Instance;
+        if (comms == null) return Fail("SwarmComms not available.");
+        return Ok(comms.FailRandomDrone());
     }
 
     Response FlightCommand(string what)
@@ -489,29 +509,6 @@ public class SwarmCommandAPI : MonoBehaviour
         return mission != null &&
                (mission.state == MissionManager.MissionState.Takeoff ||
                 mission.state == MissionManager.MissionState.Patrol);
-    }
-
-    Transform CreateWaypoint(string name, Vector3 pos)
-    {
-        var go = new GameObject(name);
-        go.transform.SetParent(agentWaypointRoot, false);
-        go.transform.position = pos;
-        agentWaypoints.Add(go.transform);
-        return go.transform;
-    }
-
-    void ClearAgentWaypoints()
-    {
-        foreach (var t in agentWaypoints)
-            if (t != null) Destroy(t.gameObject);
-
-        agentWaypoints.Clear();
-    }
-
-    void ApplyAgentWaypointHeight(float y)
-    {
-        foreach (var t in agentWaypoints)
-            if (t != null) t.position = new Vector3(t.position.x, y, t.position.z);
     }
 
     static Vec3Dto V(Vector3 v) => new Vec3Dto { x = Round(v.x), y = Round(v.y), z = Round(v.z) };
@@ -571,7 +568,22 @@ public class SwarmCommandAPI : MonoBehaviour
                 var sp = new List<Vec3Dto>();
                 foreach (var p in det.SurvivorsFound) sp.Add(V(p));
                 s.survivorPositions = sp.ToArray();
+                s.survivorFinders = det.SurvivorFinders.ToArray();
             }
+
+            var comms = SwarmComms.Instance;
+            if (comms != null) { s.commsOnline = comms.Online; s.commsTotal = comms.Total; s.commsEvent = comms.LastEvent; }
+            var grid = OccupancyGrid.Instance;
+            if (grid != null) s.mapExploredPercent = Round(grid.ExploredPercent);
+            var search = SearchMission.Instance;
+            if (search != null)
+            {
+                s.searchActive = search.Active;
+                s.searchCoverage = Round(search.Coverage * 100f);
+                s.searchLanes = search.Lanes;
+                s.searchReport = search.LastReport;
+            }
+            s.lastPlan = lastPlan;
         }
 
         if (waypointManager != null && waypointManager.waypoints != null)

@@ -51,8 +51,16 @@ The drones avoid obstacles by themselves (steer, brake, climb over low ones), bu
 sensible routes and altitudes anyway: 15-20 m clears trees and huts.
 The leader carries a camera + object detector. get_swarm_state returns "detections"
 (label, confidence, position, distance), "survivorsFound"/"survivorsTotal" and
-"survivorPositions". For a search, fly a lawnmower pattern (parallel legs ~40 m apart)
-over the area, then report what was found and where.
+"survivorPositions". 
+v2.0 abilities:
+- set_waypoints plans every leg with RRT* around buildings automatically, so you may put
+  waypoints on the far side of the city; the reply says how many detour points were added.
+- For searches use search_area: it sizes lawnmower lanes from the swarm width and camera
+  footprint, plans the legs, tracks coverage, and returns home when done. Then use
+  wait_for_mission until searchActive is false, and report coverage, survivors found
+  (survivorPositions / survivorFinders) and where.
+- The swarm shares a sensor map (mapExploredPercent) and a radio link (commsOnline /
+  commsTotal). If drones are lost, mention it; the formation re-forms by itself.
 
 How to work:
 1. Always call get_swarm_state first to learn where the leader is and what is running.
@@ -158,6 +166,21 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "search_area",
+        "description": "Autonomous search of a rectangle (world metres): lawnmower lanes sized to the "
+                       "swarm, RRT*-planned legs, coverage tracking, every drone's camera detects "
+                       "survivors, then return home and land. Only when no mission is running.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "x0": {"type": "number"}, "z0": {"type": "number"},
+                "x1": {"type": "number"}, "z1": {"type": "number"},
+                "altitude": {"type": "number", "minimum": 8, "maximum": 40, "default": 25},
+            },
+            "required": ["x0", "z0", "x1", "z1"],
+        },
+    },
+    {
         "name": "wait_for_mission",
         "description": "Wait up to `seconds` (max 60) while the mission runs, returning early when "
                        "it completes or the leader reaches a new waypoint segment. Returns state.",
@@ -209,6 +232,10 @@ class MissionAgent:
                 return self.sim.command("cancel_mission")
             if name in ("takeoff", "land", "return_home"):
                 return self.sim.command(name)
+            if name == "search_area":
+                return self.sim.command("search_area", x0=float(args["x0"]), z0=float(args["z0"]),
+                                        x1=float(args["x1"]), z1=float(args["z1"]),
+                                        altitude=float(args.get("altitude", 25)))
             if name == "wait_for_mission":
                 return self.wait_for_mission(float(args.get("seconds", 10)))
             return {"ok": False, "message": f"Unknown tool {name}"}

@@ -56,6 +56,8 @@ public class DroneController : MonoBehaviour
     public bool obstacleAvoidance = true;
     public bool objectDetection = true;
     public bool startLanded = false;
+    [Tooltip("v2.0: occupancy map, swarm comms, RRT* planning and search missions.")]
+    public bool enableV2 = true;
 
     public FlightState State { get; private set; } = FlightState.Flying;
     public bool SportMode { get; private set; }
@@ -88,6 +90,15 @@ public class DroneController : MonoBehaviour
 
         if (objectDetection && GetComponent<ObjectDetector>() == null)
             gameObject.AddComponent<ObjectDetector>();
+
+        // v2.0 systems ride on the leader: shared map, radio, RRT* planner, search missions
+        if (enableV2)
+        {
+            if (FindFirstObjectByType<OccupancyGrid>() == null) gameObject.AddComponent<OccupancyGrid>();
+            if (GetComponent<SwarmComms>() == null) gameObject.AddComponent<SwarmComms>();
+            if (FindFirstObjectByType<OSPREY.Planning.RRTStarPlanner>() == null) gameObject.AddComponent<OSPREY.Planning.RRTStarPlanner>();
+            if (GetComponent<SearchMission>() == null) gameObject.AddComponent<SearchMission>();
+        }
 
         HomePosition = transform.position;
         homeMarker = new GameObject("HomePoint").transform;
@@ -327,13 +338,14 @@ public class DroneController : MonoBehaviour
             $"Avoidance: {avoid}       <color=#AAAAAA>[F1] controls</color>", style);
 
         if (!showHelp) return;
-        GUI.Box(new Rect(10, Screen.height - 300, 460, 206), GUIContent.none);
-        GUI.Label(new Rect(18, Screen.height - 296, 450, 200),
+        GUI.Box(new Rect(10, Screen.height - 316, 460, 222), GUIContent.none);
+        GUI.Label(new Rect(18, Screen.height - 312, 450, 216),
             "<b>Flight</b>   W/S forward/back · A/D strafe · Q/E yaw\n" +
             "              Space climb · Left Shift descend · release to hover\n" +
             "              T take off · L land · G return home · X sport mode\n" +
             "<b>Mission</b>  P start · Esc cancel · 1-0 formations\n" +
-            "<b>View</b>      C chase cam · V tactical cam · O detection overlay\n\n" +
+            "<b>View</b>      C chase cam · V tactical cam · O detections · M map\n" +
+            "<b>Swarm</b>    K simulate a drone failure\n\n" +
             "Avoidance steers around obstacles, brakes when close,\n" +
             "and climbs over trees, huts and walls.", style);
     }

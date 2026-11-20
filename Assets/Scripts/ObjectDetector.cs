@@ -15,6 +15,10 @@ using UnityEngine;
 /// The overlay draws YOLO-style labelled boxes in the Game view (toggle with O) and a
 /// panel with counts. The first sighting of each survivor is logged and kept in
 /// SurvivorsFound; SwarmCommandAPI reports both to the mission agent.
+///
+/// v2.0: followers carry one too (no overlay). Their survivor sightings are radioed to the
+/// leader over SwarmComms (range and packet loss apply) and merged into the leader's list,
+/// so the whole swarm searches at once.
 /// </summary>
 public class ObjectDetector : MonoBehaviour
 {
@@ -46,7 +50,14 @@ public class ObjectDetector : MonoBehaviour
 
     public readonly List<Detection> detections = new List<Detection>();
     public readonly List<Vector3> SurvivorsFound = new List<Vector3>();
+    public readonly List<string> SurvivorFinders = new List<string>();
     public int SurvivorsTotal { get; private set; }
+
+    /// <summary>The leader's detector, which keeps the swarm's merged survivor list.</summary>
+    public static ObjectDetector Primary { get; private set; }
+    public bool IsPrimary { get; private set; }
+    readonly HashSet<GameObject> survivorObjects = new HashSet<GameObject>();
+    FollowerDrone follower;
 
     class Candidate
     {
@@ -63,7 +74,7 @@ public class ObjectDetector : MonoBehaviour
 
     static string Classify(string name)
     {
-        if (name.StartsWith("RescueTarget")) return "person";
+        if (name.StartsWith("RescueTarget_")) return "person";   // not the "RescueTargets" folder
         if (name.StartsWith("Building_") || name == "Hangar" || name == "ControlTower") return "building";
         if (name == "Tree" || name == "Pine") return "tree";
         if (name.StartsWith("Hut_")) return "hut";
@@ -74,6 +85,11 @@ public class ObjectDetector : MonoBehaviour
 
     void Start()
     {
+        follower = GetComponent<FollowerDrone>();
+        IsPrimary = follower == null;
+        if (IsPrimary) Primary = this;
+        else { showOverlay = false; range = 60f; interval = 0.3f; }
+
         foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None))
         {
             string label = Classify(t.name);
@@ -83,12 +99,13 @@ public class ObjectDetector : MonoBehaviour
             candidates.Add(new Candidate { go = t.gameObject, label = label, renderers = rs });
             if (label == "person") SurvivorsTotal++;
         }
-        Debug.Log($"[ObjectDetector] Camera online: watching {candidates.Count} objects, {SurvivorsTotal} survivors hidden in the world.");
+        if (IsPrimary) Debug.Log($"[ObjectDetector] Camera online: watching {candidates.Count} objects, {SurvivorsTotal} survivors hidden in the world.");
     }
 
     void Update()
     {
-        if (Input.GetKeyDown(toggleKey)) showOverlay = !showOverlay;
+        if (IsPrimary && Input.GetKeyDown(toggleKey)) showOverlay = !showOverlay;
+        if (follower != null && !follower.Alive) return;
         if (Time.time < nextScan) return;
         nextScan = Time.time + interval;
         Scan();
@@ -140,14 +157,26 @@ public class ObjectDetector : MonoBehaviour
 
             if (c.label == "person" && !c.found && conf >= survivorConfidence)
             {
-                c.found = true;
-                SurvivorsFound.Add(b.center);
-                Debug.Log($"[ObjectDetector] SURVIVOR FOUND: {c.go.name} at ({b.center.x:0}, {b.center.z:0}), " +
-                          $"confidence {conf:0.00}. {SurvivorsFound.Count}/{SurvivorsTotal} found.");
+                if (IsPrimary) { c.found = true; RegisterSurvivor(c.go, b.center, conf, "leader"); }
+                else if (Primary != null && SwarmComms.Instance != null && SwarmComms.Instance.SendToLeader(gameObject))
+                {
+                    c.found = true;   // delivered; otherwise try again on the next scan
+                    Primary.RegisterSurvivor(c.go, b.center, conf, name);
+                }
             }
         }
 
         detections.Sort((a, b) => a.distance.CompareTo(b.distance));
+    }
+
+    /// <summary>Merge a survivor sighting into the swarm's list (leader only).</summary>
+    public void RegisterSurvivor(GameObject obj, Vector3 pos, float conf, string finder)
+    {
+        if (!survivorObjects.Add(obj)) return;
+        SurvivorsFound.Add(pos);
+        SurvivorFinders.Add(finder);
+        Debug.Log($"[ObjectDetector] SURVIVOR FOUND by {finder}: {obj.name} at ({pos.x:0}, {pos.z:0}), " +
+                  $"confidence {conf:0.00}. {SurvivorsFound.Count}/{SurvivorsTotal} found.");
     }
 
     // ===================================================
@@ -172,6 +201,7 @@ public class ObjectDetector : MonoBehaviour
 
     void OnGUI()
     {
+        if (!IsPrimary) return;
         if (pixel == null) { pixel = new Texture2D(1, 1); pixel.SetPixel(0, 0, Color.white); pixel.Apply(); }
         if (labelStyle == null) labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold };
         if (panelStyle == null) panelStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, richText = true };
